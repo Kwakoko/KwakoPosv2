@@ -538,13 +538,9 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     return "Dashboard";
   });
 
-  const [impersonatedTenant, setImpersonatedTenant] = useState<ImpersonatedTenant | null>(() => {
-    try {
-      const saved = sessionStorage.getItem("kwakopos:v2:impersonation");
-      if (saved) return JSON.parse(saved);
-    } catch { /* ignore */ }
-    return null;
-  });
+  // Platform tenant inspection is no longer persisted client-side. The Platform Super Admin
+  // stays in the independent control plane; tenant inspection uses the server-side Support Tower.
+  const [impersonatedTenant, setImpersonatedTenant] = useState<ImpersonatedTenant | null>(null);
 
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -785,65 +781,49 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     }
 
     let alive = true;
-    // Small stabilization delay: lets the access token settle in memory after
-    // login before firing the first validation request. Without this the effect
-    // can fire synchronously before the token is stored, causing a spurious 401.
-    const delay = setTimeout(() => {
-      if (!alive) return;
-      void apiValidateSession()
-        .then((result) => {
-          if (!alive) return;
-          const data = result?.data || result;
-          const expiry = Date.parse(String(data?.expiresAt || ""));
-          const refreshExpiry = Date.parse(String(data?.refreshTokenExpiresAt || ""));
-          const idleMinutes = Number(data?.policy?.idleTimeoutMinutes);
-          const warningSeconds = Number(data?.policy?.warningDurationSeconds);
-          if (Number.isFinite(expiry)) setSessionExpiresAt(expiry);
-          if (Number.isFinite(refreshExpiry)) setSessionRefreshTokenExpiresAt(refreshExpiry);
-          setSessionPolicy((current) => ({
-            ...current,
-            idleTimeoutMs: Number.isFinite(idleMinutes) ? idleMinutes * 60_000 : current.idleTimeoutMs,
-            warningDurationMs: Number.isFinite(warningSeconds) ? warningSeconds * 1000 : current.warningDurationMs,
-          }));
-          const serverActivity = Date.parse(String(data?.lastActivityAt || ""));
-          if (Number.isFinite(serverActivity)) {
-            setSessionLastActivityAt(serverActivity);
-            sessionLastActivityRef.current = serverActivity;
-          }
-          setSessionStatus("AUTHENTICATED_ONLINE");
-          setOfflineExpiresAt(null);
-          void saveDurableSessionState({
-            sessionId: String(getStoredSession()?.sessionId || ""),
-            tenantId: user.tenantId,
-            branchId: user.branchId,
-            userId: user.id,
-            deviceId: getDeviceId(),
-            status: "AUTHENTICATED_ONLINE",
-            authenticatedAt: Number.isFinite(expiry) ? expiry - sessionPolicy.absoluteTimeoutMs : Date.now(),
-            lastOnlineAt: Date.now(),
-            lastActivityAt: Number.isFinite(serverActivity) ? serverActivity : Date.now(),
-            serverExpiresAt: Number.isFinite(expiry) ? expiry : null,
-            lastValidatedAt: Date.now(),
-            localLogoutPending: false,
-          });
-          void apiRecordSessionEvent("SESSION_RESTORED", { source: "session-validate" });
-        })
-        .catch((err: unknown) => {
-          if (!alive) return;
-          // NEVER terminate the session from the validate catch.
-          // The access token is memory-only and is lost on every page reload.
-          // A 401 here almost always means the token hasn't been refreshed yet,
-          // NOT that the server session is revoked. The authoritative expiry
-          // mechanism is the idle/absolute timeout ticker (setInterval below).
-          // Terminating here was the root cause of the post-login flash to LoginPage.
-          console.warn("[Session] Validate transient failure (token may still be refreshing):", (err as any)?.status);
+    void apiValidateSession()
+      .then((result) => {
+        if (!alive) return;
+        const data = result?.data || result;
+        const expiry = Date.parse(String(data?.expiresAt || ""));
+        const refreshExpiry = Date.parse(String(data?.refreshTokenExpiresAt || ""));
+        const idleMinutes = Number(data?.policy?.idleTimeoutMinutes);
+        const warningSeconds = Number(data?.policy?.warningDurationSeconds);
+        if (Number.isFinite(expiry)) setSessionExpiresAt(expiry);
+        if (Number.isFinite(refreshExpiry)) setSessionRefreshTokenExpiresAt(refreshExpiry);
+        setSessionPolicy((current) => ({
+          ...current,
+          idleTimeoutMs: Number.isFinite(idleMinutes) ? idleMinutes * 60_000 : current.idleTimeoutMs,
+          warningDurationMs: Number.isFinite(warningSeconds) ? warningSeconds * 1000 : current.warningDurationMs,
+        }));
+        const serverActivity = Date.parse(String(data?.lastActivityAt || ""));
+        if (Number.isFinite(serverActivity)) {
+          setSessionLastActivityAt(serverActivity);
+          sessionLastActivityRef.current = serverActivity;
+        }
+        setSessionStatus("AUTHENTICATED_ONLINE");
+        setOfflineExpiresAt(null);
+        void saveDurableSessionState({
+          sessionId: String(getStoredSession()?.sessionId || ""),
+          tenantId: user.tenantId,
+          branchId: user.branchId,
+          userId: user.id,
+          deviceId: getDeviceId(),
+          status: "AUTHENTICATED_ONLINE",
+          authenticatedAt: Number.isFinite(expiry) ? expiry - sessionPolicy.absoluteTimeoutMs : Date.now(),
+          lastOnlineAt: Date.now(),
+          lastActivityAt: Number.isFinite(serverActivity) ? serverActivity : Date.now(),
+          serverExpiresAt: Number.isFinite(expiry) ? expiry : null,
+          lastValidatedAt: Date.now(),
+          localLogoutPending: false,
         });
-    }, 1500);
-    return () => { alive = false; clearTimeout(delay); };
-  // Intentionally exclude sessionExpiresAt: including it causes the effect to
-  // re-run every time validation updates the expiry, creating an infinite loop.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isOnline, sessionPolicy.absoluteTimeoutMs, sessionPolicy.offlineGracePeriodMs, terminateSession]);
+        void apiRecordSessionEvent("SESSION_RESTORED", { source: "session-validate" });
+      })
+      .catch(async () => {
+        if (alive && navigator.onLine) await terminateSession("SESSION_TIMEOUT", true, true);
+      });
+    return () => { alive = false; };
+  }, [user, isOnline, sessionExpiresAt, sessionPolicy.absoluteTimeoutMs, sessionPolicy.offlineGracePeriodMs, terminateSession]);
 
   useEffect(() => {
     if (!user) return;
@@ -908,7 +888,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   const permissions = useMemo(() => claims.permissions || [], [claims]);
   const moduleEntitlements = useMemo(() => claims.moduleEntitlements || [], [claims]);
   const isSuperAdmin = Boolean(
-    user && (user.role === "SUPER_ADMIN" || user.role === "SUPERADMIN" || permissions.includes("SUPER_ADMIN_OPERATIONS") || permissions.includes("ADMIN:PLATFORM"))
+    user && String(user.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"
   );
   const currentTenantId = impersonatedTenant?.tenantId || (isSuperAdmin ? null : user?.tenantId || null);
   const currentBranchId = impersonatedTenant?.branchId || (isSuperAdmin ? null : user?.branchId || null);
@@ -1044,24 +1024,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     }
   }, [isSuperAdmin, impersonatedTenant, activeTab]);
 
-  const startImpersonation = useCallback(async (tenantId: string, tenantName?: string, branchId?: string, branchName?: string) => {
+  const startImpersonation = useCallback(async (_tenantId: string, _tenantName?: string, _branchId?: string, _branchName?: string) => {
     if (!isSuperAdmin) {
-      throw new Error("Only Super Admin can activate tenant inspection mode.");
+      throw new Error("Only Platform Super Admin can inspect tenants.");
     }
-    const result = await apiSwitchContext(tenantId, branchId);
-    const resolved: ImpersonatedTenant = {
-      tenantId: result.tenantId,
-      tenantName: result.tenantName || tenantName || result.tenantId,
-      branchId: result.branchId,
-      branchName: result.branchName || branchName || result.branchId,
-    };
-    setImpersonatedTenant(resolved);
-    try {
-      sessionStorage.setItem("kwakopos:v2:impersonation", JSON.stringify(resolved));
-    } catch { /* ignore */ }
-    setUser((prev) => prev ? { ...prev, tenantId: result.tenantId, branchId: result.branchId } : null);
-    setActiveModuleState("Retail");
-    setActiveTabState("Dashboard");
+    throw new Error("Tenant application impersonation is disabled. Use the Super Admin Support Control Tower for tenant inspection.");
   }, [isSuperAdmin]);
 
   const stopImpersonation = useCallback(async () => {
@@ -1069,16 +1036,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     try {
       sessionStorage.removeItem("kwakopos:v2:impersonation");
     } catch { /* ignore */ }
-    try {
-      const result = await apiSwitchContext("PLATFORM_SUPER_ADMIN");
-      setUser((prev) => prev ? { ...prev, tenantId: result.tenantId, branchId: result.branchId } : null);
-    } catch {
-      /* ignore */
-    }
     setActiveTabState("Super Admin");
   }, []);
 
   const switchTenant = async (id: string) => {
+    if (isSuperAdmin) return;
     if (!id || id === currentTenantId) return;
     if (!availableTenantsList.some((tenant) => tenant.id === id)) return;
     if (!isOnline) return;
@@ -1091,6 +1053,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   };
 
   const switchBranch = async (id: string) => {
+    if (isSuperAdmin) return;
     if (!id || id === currentBranchId) return;
     if (!availableBranchesList.some((branch) => branch.id === id)) return;
     if (!isOnline) return;
@@ -1257,15 +1220,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       setSyncError(errorMessage);
       syncStatusService.failSync(error);
       setSyncStatus(syncStatusService.getSnapshot(syncScope));
-
-      // A server-side catalog rejection can leave optimistic IndexedDB metadata ahead of
-      // the authoritative replica. Re-bootstrap immediately so rejected Category/Brand
-      // edits, stale writes, invalid parents, and invalid reassignment choices cannot linger
-      // in the active UI as apparently-saved state.
-      if (
-        errorMessage.startsWith("SYNC_NOT_VERIFIED:") ||
-        errorMessage.startsWith("SYNC_PARTIAL_REJECTION:")
-      ) {
+      if (errorMessage.startsWith("SYNC_NOT_VERIFIED:") || errorMessage.startsWith("SYNC_PARTIAL_REJECTION:")) {
         try {
           await syncEngine.bootstrapWithServer(
             async (req) => {
@@ -1284,10 +1239,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
             targetBranchId,
           );
           db.purgeOrphanedOutbox(targetTenantId, targetBranchId);
-          await db.refreshStoresFromNative([
-            "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
-            "sales", "payments", "receipts", "customers", "suppliers", "configuration", "syncOutbox", "syncMetadata",
-          ]);
+          await db.refreshStoresFromNative();
           setPendingOutboxCount(db.getPendingOutbox(targetTenantId, targetBranchId).length);
           publishDataChanged({ action: "SYNC_RECONCILED_AFTER_REJECTION", tenantId: targetTenantId, branchId: targetBranchId });
         } catch (reconcileError) {

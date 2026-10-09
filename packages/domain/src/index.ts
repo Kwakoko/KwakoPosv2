@@ -77,6 +77,27 @@ export function assertStockLedgerImmutability(existingLedgerId?: string): void {
  * Backdating threshold limit: maximum 2 years (730 days) allowed.
  */
 export const BACKDATING_MAX_THRESHOLD_DAYS = 730;
+export const BACKDATING_PERMISSION = "INVENTORY_BACKDATE";
+export const SALE_BACKDATING_PERMISSION = "SALE_BACKDATE";
+
+/**
+ * Backdated inventory mutations require an explicit permission unless the
+ * caller is operating with the platform-wide wildcard permission.
+ */
+export function assertBackdatingPermission(ctx: TenantContext): void {
+  const permissions = Array.isArray(ctx?.permissions) ? ctx.permissions : [];
+  if (!permissions.includes("*") && !permissions.includes(BACKDATING_PERMISSION)) {
+    throw new Error("INVENTORY_BACKDATE_PERMISSION_REQUIRED: explicit INVENTORY_BACKDATE permission is required");
+  }
+}
+
+/** Explicit permission gate for POS sales recorded against a historical sale timestamp. */
+export function assertSaleBackdatingPermission(ctx: TenantContext): void {
+  const permissions = Array.isArray(ctx?.permissions) ? ctx.permissions : [];
+  if (!permissions.includes("*") && !permissions.includes(SALE_BACKDATING_PERMISSION)) {
+    throw new Error("SALE_BACKDATE_PERMISSION_REQUIRED: explicit SALE_BACKDATE permission is required");
+  }
+}
 
 /**
  * Validates that a backdated inventory movement timestamp is within legal operational boundaries:
@@ -152,26 +173,24 @@ export function validateRetroactiveTimeline(
   occurredAt: Date | string | number,
   delta: number
 ): RetroactiveTimelineValidationResult {
-  // Positive delta cannot cause intermediate balance to become negative
+  const targetTime = new Date(occurredAt).getTime();
+  if (Number.isNaN(targetTime)) {
+    throw new Error("INVALID_DATE: Provided occurredAt timestamp is not a valid date.");
+  }
+
+  // Positive deltas cannot create a negative balance.
   if (delta >= 0) {
     return { valid: true, lowestIntermediateBalance: 0 };
   }
 
-  const targetTime = new Date(occurredAt).getTime();
   const sorted = [...ledgerEntries].sort((a, b) => {
     const timeA = new Date((a as any).occurredAt || (a as any).createdAt).getTime();
     const timeB = new Date((b as any).occurredAt || (b as any).createdAt).getTime();
     return timeA - timeB;
   });
 
-  let running = 0;
-  let lowestAfterTarget = Infinity;
-  let violationDate: string | undefined;
-  let violationBalance: number | undefined;
-
-  for (const entry of sorted) {
+  const effectiveChange = (entry: StockLedger): number => {
     const qty = Number(entry.quantityChange !== undefined ? entry.quantityChange : entry.quantity);
-    let effectiveChange = qty;
     switch (entry.movementType) {
       case "OPENING_STOCK":
       case "OPENING":
@@ -182,8 +201,7 @@ export function validateRetroactiveTimeline(
       case "RETURN":
       case "ADJUSTMENT_GAIN":
       case "PRODUCTION_OUTPUT":
-        effectiveChange = Math.abs(qty);
-        break;
+        return Math.abs(qty);
       case "SALE":
       case "SUPPLIER_RETURN":
       case "TRANSFER_OUT":
@@ -191,45 +209,52 @@ export function validateRetroactiveTimeline(
       case "EXPIRY":
       case "ADJUSTMENT_LOSS":
       case "PRODUCTION_USAGE":
-        effectiveChange = -Math.abs(qty);
-        break;
+        return -Math.abs(qty);
       default:
-        effectiveChange = qty;
-        break;
+        return qty;
     }
-    running += effectiveChange;
+  };
 
+  // The backdated movement is inserted before any existing movement at the same
+  // timestamp. This makes the insertion point deterministic and auditable.
+  let runningBeforeTarget = 0;
+  for (const entry of sorted) {
     const entryTime = new Date((entry as any).occurredAt || (entry as any).createdAt).getTime();
-    if (entryTime >= targetTime) {
-      const projected = running + delta;
-      if (projected < lowestAfterTarget) {
-        lowestAfterTarget = projected;
-      }
-      if (projected < 0 && !violationDate) {
-        violationDate = new Date(entryTime).toISOString();
-        violationBalance = projected;
-      }
-    }
+    if (Number.isNaN(entryTime) || entryTime >= targetTime) break;
+    runningBeforeTarget += effectiveChange(entry);
   }
 
-  // Also check end-of-timeline projected balance
-  if (running + delta < 0 && !violationDate) {
-    violationDate = new Date().toISOString();
-    violationBalance = running + delta;
-  }
-
-  if (violationDate) {
+  const insertionBalance = runningBeforeTarget + delta;
+  if (insertionBalance < 0) {
     return {
       valid: false,
-      lowestIntermediateBalance: violationBalance ?? lowestAfterTarget,
-      violationDate,
-      violationBalance,
+      lowestIntermediateBalance: insertionBalance,
+      violationDate: new Date(targetTime).toISOString(),
+      violationBalance: insertionBalance,
     };
+  }
+
+  let running = runningBeforeTarget;
+  let lowest = insertionBalance;
+  for (const entry of sorted) {
+    const entryTime = new Date((entry as any).occurredAt || (entry as any).createdAt).getTime();
+    if (Number.isNaN(entryTime) || entryTime < targetTime) continue;
+    running += effectiveChange(entry);
+    const projected = running + delta;
+    if (projected < lowest) lowest = projected;
+    if (projected < 0) {
+      return {
+        valid: false,
+        lowestIntermediateBalance: projected,
+        violationDate: new Date(entryTime).toISOString(),
+        violationBalance: projected,
+      };
+    }
   }
 
   return {
     valid: true,
-    lowestIntermediateBalance: lowestAfterTarget === Infinity ? running + delta : lowestAfterTarget,
+    lowestIntermediateBalance: lowest,
   };
 }
 

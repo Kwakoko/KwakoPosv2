@@ -78,8 +78,8 @@ export function prepareRelease(options?: { forceBump?: "MAJOR" | "MINOR" | "PATC
 
     const manifest = generateReleaseManifest({
       version: releaseVersion,
-      certification: "FAIL",
-      gitSha: execSync("git rev-parse HEAD", { encoding: "utf8" }).trim(),
+      certification: "PENDING",
+      gitSha: null,
     });
 
     if (!options?.dryRun) {
@@ -131,8 +131,8 @@ export function prepareRelease(options?: { forceBump?: "MAJOR" | "MINOR" | "PATC
 
   const manifest = generateReleaseManifest({
     version: nextVersion,
-    certification: "FAIL",
-    gitSha: execSync("git rev-parse HEAD", { encoding: "utf8" }).trim(),
+    certification: "PENDING",
+    gitSha: null,
   });
   console.log(`✓ Release Manifest synchronized for version ${manifest.version} (Tag: ${manifest.tag})`);
 

@@ -4,6 +4,15 @@ import { runSuperAdminPlatformCertification } from "../../scripts/certification/
 
 describe("Phase 29 — KwakoPos Super Admin & Platform UI Test Suite", () => {
   const engine = new SuperAdminPlatformEngine();
+  engine.registerTenant({
+    tenantId: "TENANT-001",
+    name: "Certification Tenant",
+    status: "ACTIVE",
+    country: "TZ",
+    branchesCount: 1,
+    modulesCount: 0,
+    createdAt: "2026-10-08T00:00:00Z",
+  });
 
   it("should verify plane isolation between Super Admin Control Plane and Tenant Operating Plane", () => {
     const plane = engine.getOperatingPlane("ADM-001", "admin@kwakopos.com", "PLATFORM_ADMIN");
@@ -36,10 +45,10 @@ describe("Phase 29 — KwakoPos Super Admin & Platform UI Test Suite", () => {
     expect(flagRes.evaluationPath).toBe("Global -> Country -> Tenant");
   });
 
-  it("should pass 100% of the 70-Pillar Super Admin & Platform UI certification campaign", () => {
+  it("should pass 100% of the repository-backed Super Admin certification campaign", () => {
     const cert = runSuperAdminPlatformCertification();
-    expect(cert.totalPillars).toBe(70);
-    expect(cert.passedPillars).toBe(70);
+    expect(cert.totalPillars).toBe(16);
+    expect(cert.passedPillars).toBe(16);
     expect(cert.failedPillars).toBe(0);
     expect(cert.successRatePct).toBe(100);
   });

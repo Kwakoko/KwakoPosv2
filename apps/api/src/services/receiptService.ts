@@ -22,6 +22,10 @@ export class ReceiptService {
     return this.repo.searchReceipts(ctx, filter);
   }
 
+  async recordPrint(ctx: TenantContext, receiptId: string, printedBy: string, options: { printType?: "INITIAL" | "REPRINT"; printerName?: string; paperWidth?: string; reason?: string } = {}) {
+    return this.repo.recordPrint(ctx, receiptId, printedBy, options);
+  }
+
   async recordReprint(ctx: TenantContext, receiptId: string, printedBy: string, reason?: string) {
     return this.repo.recordReprint(ctx, receiptId, printedBy, reason);
   }

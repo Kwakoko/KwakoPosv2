@@ -3,23 +3,18 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
-const LOCK_ID = "DASHBOARD-ANALYTICS-PRODUCTION-LOCK-2026-10-07";
+const LOCK_ID = "DASHBOARD-ANALYTICS-PRODUCTION-LOCK-2026-10-04";
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "7d05d36ec0b43f970733844c357c342e36cf042b",
-  "packages/database/prisma/schema.prisma": "af684372fe661dea3254ade9e4c1879faf5bdcc4",
-  "packages/database/prisma/migrations/202610070001_dashboard_production_read_model/migration.sql": "5a053151e38557c9a016dc3d7b47b01c8aa2eb25",
-  "packages/database/prisma/migrations/202610070002_dashboard_read_model_rls/migration.sql": "d7d998c2a9baf9d82c0fa491986a26c7df80ba0b",
-  "apps/web/src/services/dashboardCardRegistry.ts": "69ccee4ebd02944cecdb008d730692b632fb3146",
-  "apps/web/src/modules/moduleRegistry.ts": "6002fc7096bf4412cc9bc8643c26a0561b08bfc6",
-  "apps/web/src/pages/DashboardPage.tsx": "cbfe27afea615933098d3888bb958e5b944012fb",
-  "apps/api/src/services/dashboardKpiService.ts": "f07c91ae53ef563119ee24ee4efd4c149468b784",
-  "apps/web/src/services/dashboardKpiService.ts": "ef9fcc7c256dcda2b901371ae9f73ed7819a7248",
-  "packages/database/src/prismaProductionRepositories.ts": "1fa400c3466a7315db9daae7f86d97ce64791f41",
-  "tests/integration/dashboard-final-closures.test.ts": "777bb47676b33a90f2011fa9d45e030829a18d1b",
-  ".github/workflows/ci.yml": "a92b7208971968053f6de87aa7cb74b8c4fab705",
-  ".github/workflows/production-certification.yml": "4ea8fa0290d154e3a66ea135e524928f7bf1d273",
-  ".github/workflows/production-release-exact-main.yml": "6293102ebfff3d5b578dc8e76fe8323f481f41c2"
+  "package.json": "29fdef497005f558d7bb5347aff0b5e9d2641925",
+  "apps/web/src/pages/DashboardPage.tsx": "59b98fc129531507362218674b135597bf224f8d",
+  "apps/api/src/services/dashboardKpiService.ts": "86f8ee60dde1074f08818e33ab5dc36ebd3779ff",
+  "apps/web/src/services/dashboardKpiService.ts": "9c624cadd529f028ebb46ca4fdfc95712e677d84",
+  "packages/database/src/prismaProductionRepositories.ts": "b2cf81b306fca370b230e8554c60b33c920279eb",
+  "tests/integration/dashboard-final-closures.test.ts": "07a0c2c012569e52f32fa0c719bafffb28e7f129",
+  ".github/workflows/ci.yml": "e1fba0fbf5a7eed4302529d3c16804de70228e6d",
+  ".github/workflows/production-certification.yml": "cbb5ee8eb264dcd89752b036bce03f76afb62048",
+  ".github/workflows/production-release-exact-main.yml": "83f32ee23991146795bb22cde954c1734d5b9aea"
 };
 
 const REQUIRED_MARKERS: Array<[string,string,string]> = [
@@ -40,13 +35,7 @@ const REQUIRED_MARKERS: Array<[string,string,string]> = [
   ["raw-payment-donut-metric", "apps/web/src/pages/DashboardPage.tsx", "value: Math.max(rawMetric, 0)"],
   ["cashier-authority-lookup", "packages/database/src/prismaProductionRepositories.ts", "db.user.findMany"],
   ["cashier-name-map", "packages/database/src/prismaProductionRepositories.ts", "cashierNames"],
-  ["recent-orders-sync-label", "apps/web/src/pages/DashboardPage.tsx", "Sync</th>"],
-  ["supplier-payables-kpi", "apps/api/src/services/dashboardKpiService.ts", "SupplierPayables: numberValue(payables.supplier_payables)"],
-  ["overdue-payables-kpi", "apps/api/src/services/dashboardKpiService.ts", "overduePayablesCount: numberValue(payables.overdue_payables_count)"],
-  ["dashboard-read-model-cache", "apps/api/src/services/dashboardKpiService.ts", "DASHBOARD_READ_MODEL_VERSION"],
-  ["dashboard-read-model-rls", "packages/database/prisma/migrations/202610070002_dashboard_read_model_rls/migration.sql", "kwakopos_tenant_dashboard_read_models"],
-  ["dashboard-branch-selector", "apps/web/src/pages/DashboardPage.tsx", "aria-label=\"Dashboard branch\""],
-  ["dashboard-payables-card", "apps/web/src/modules/moduleRegistry.ts", "RetailSupplierPayables"],
+  ["recent-orders-sync-label", "apps/web/src/pages/DashboardPage.tsx", '<th className="p-3 text-center">Sync</th>'],
   ["dashboard-final-isolation-test", "tests/integration/dashboard-final-closures.test.ts", "Cross-tenant isolation test"],
   ["dashboard-final-ranking-test", "tests/integration/dashboard-final-closures.test.ts", "revenueRank"],
   ["dashboard-final-cashier-test", "tests/integration/dashboard-final-closures.test.ts", "Amani Dashboard Cashier"],

@@ -56,10 +56,30 @@ jobs:
         run: npm run db:generate
       - name: Apply database migrations
         run: npm run db:migrate
+      - name: Foundation Production Lock A01-A12
+        run: npm run certify:foundation
+      - name: Super Admin Production Lock
+        run: npm run certify:super-admin
+      - name: Security Platform Production Lock
+        run: npm run certify:security-platform-lock
+      - name: Platform Services C01-C11 Production Lock
+        run: npm run certify:platform-services-lock
       - name: Production Auth Transport Lock
         run: npm run release:auth-lock
+      - name: Security Platform Production Lock
+        run: npm run certify:security-lock
       - name: Lint
         run: npm run lint
+      - name: Finance / Accounting Production Lock v1
+        run: npm run certify:finance-lock
+      - name: Receivables Audit Production Lock
+        run: npm run certify:receivables-lock
+      - name: Accounts Payable Audit Production Lock
+        run: npm run certify:payables-lock
+      - name: Expenses Production Lock
+        run: npm run certify:expenses-lock
+      - name: Payments Audit Controls Production Lock
+        run: npm run certify:payments-lock
       - name: Build
         run: npm run build
       - name: Synchronize test database schema
@@ -76,14 +96,42 @@ jobs:
         run: npm run test:sync
       - name: Version Sync Certification
         run: npm run certify:version-sync
+      - name: SemVer Production Lock
+        run: npm run certify:semver-lock
       - name: Commit Contract
         run: npx tsx scripts/ci/validate-commit-message.ts
+      - name: Reports Production Lock
+        run: npm run certify:reports
       - name: Navigation Production Lock
         run: npm run certify:navigation-lock
       - name: Dashboard Analytics Production Lock
         run: npm run certify:dashboard-lock
       - name: Conflict Center Production Lock
         run: npx tsx scripts/certification/conflict-center-production-lock.ts
+      - name: Inventory Production Lock v1
+        run: npm run certify:inventory-lock
+      - name: Administration Production Lock
+        run: npm run certify:administration-lock
+      - name: Customers / Contacts Production Lock v1
+        run: npx tsx scripts/certification/customers-contacts-production-lock.ts
+      - name: Sales Production Lock v1
+        run: npm run certify:sales-lock
+      - name: Pricing / Promotions Production Lock
+        run: npm run certify:pricing-lock
+      - name: Receipt Store Production Lock v1
+        run: npm run certify:receipts-lock
+      - name: Notifications Production Lock v1
+        run: npm run certify:notifications-lock
+      - name: Tax / Fiscalization Production Lock v1
+        run: npm run certify:tax-fiscal-lock
+      - name: Cash Management Production Lock v1
+        run: npm run certify:cash-lock
+      - name: Backdated Inventory Production Lock
+        run: npm run certify:backdated-lock
+      - name: Offline Sync Platform Production Lock
+        run: npm run certify:offline-sync-lock
+      - name: Support Production Lock v1
+        run: npm run certify:support-lock
       - name: Module Contract
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
       - name: Release Quality Gates

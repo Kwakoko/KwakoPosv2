@@ -117,14 +117,20 @@ export function passwordNeedsRehash(storedHash: string): boolean {
 }
 
 export function generateAccessToken(payload: Partial<JwtPayload> & { tenantId: string; branchId: string; userId?: string }): string {
+  const isProduction = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification";
+  if (isProduction && (!Array.isArray(payload.roles) || payload.roles.length === 0 || !Array.isArray(payload.permissions) || payload.permissions.length === 0)) {
+    throw new Error("SECURITY_FATAL: Production access tokens require explicit roles and permissions.");
+  }
   const normalized: JwtPayload = {
     ...payload,
     sub: payload.sub || payload.userId || "usr_system",
     tenantId: payload.tenantId,
     branchId: payload.branchId,
     email: payload.email || "system@kwakopos.local",
-    roles: payload.roles && payload.roles.length ? payload.roles : ["ADMIN"],
-    permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"],
+    // Security invariant: omitted role/permission claims MUST fail closed.
+    // Privileged claims are authoritative only when explicitly supplied by the caller.
+    roles: Array.isArray(payload.roles) ? payload.roles.filter((role) => typeof role === "string" && role.length > 0) : [],
+    permissions: Array.isArray(payload.permissions) ? payload.permissions.filter((permission) => typeof permission === "string" && permission.length > 0) : [],
     deviceId: payload.deviceId || "dev_system",
     ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
   };

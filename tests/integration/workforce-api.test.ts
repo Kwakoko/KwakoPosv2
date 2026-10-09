@@ -79,6 +79,54 @@ describe("Workforce Fastify REST API Integration", () => {
     expect(body.data.code).toBe("TECH");
   });
 
+  it("denies Workforce administration without workforce permission", async () => {
+    const cashierToken = generateAccessToken({
+      userId,
+      tenantId: prodTenantId,
+      branchId: prodBranchId,
+      roles: ["CASHIER"],
+      permissions: ["SALE_VIEW"],
+    });
+    const res = await prodApp.inject({
+      method: "POST",
+      url: "/api/v1/workforce/departments",
+      headers: { authorization: "Bearer " + cashierToken },
+      payload: { name: "Forbidden", code: "FORBID" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("persists a staff expense against an Employee", async () => {
+    const employeeRes = await prodApp.inject({
+      method: "POST",
+      url: "/api/v1/workforce/employees",
+      headers: { authorization: "Bearer " + prodAuthToken },
+      payload: { firstName: "Staff", lastName: "Expense" },
+    });
+    expect(employeeRes.statusCode).toBe(201);
+    const employeeId = JSON.parse(employeeRes.body).data.employee.id;
+
+    const expenseRes = await prodApp.inject({
+      method: "POST",
+      url: "/api/v1/expenses",
+      headers: { authorization: "Bearer " + prodAuthToken },
+      payload: {
+        category: "STAFF_TRANSPORT",
+        amount: 45000,
+        reason: "Branch visit",
+        description: "Staff transport",
+        payee: "Staff Expense",
+        employeeId,
+        paymentMethod: "CASH",
+        status: "PENDING",
+        idempotencyKey: "staff-expense-" + employeeId,
+      },
+    });
+    expect(expenseRes.statusCode).toBe(201);
+    const expense = JSON.parse(expenseRes.body).data;
+    expect(expense.employeeId).toBe(employeeId);
+  });
+
   it("POST /api/v1/workforce/employees creates a sanitized employee profile and persists pay", async () => {
     const res = await prodApp.inject({
       method: "POST",

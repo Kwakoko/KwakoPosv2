@@ -63,6 +63,7 @@ export interface PosSaleStockItem {
   unitCost?: number;
   name?: string;
   sku?: string;
+  bundleParentVariantId?: string;
 }
 
 export interface PosSaleStockParams {
@@ -275,14 +276,17 @@ export async function queueStockAdjustment(
   let variant = db.productVariants.get(command.variantId) as any;
   if (!variant) {
     for (const v of db.productVariants.values()) {
-      if (v.id === command.variantId || (v.productId === command.productId && v.sku === command.sku)) {
+      if (v.id === command.variantId) {
         variant = v;
         break;
       }
     }
   }
+  if (!variant || variant.tenantId !== command.tenantId || variant.branchId !== command.branchId || variant.productId !== command.productId) {
+    throw new Error("TENANT_BRANCH_VARIANT_OWNERSHIP_VIOLATION");
+  }
 
-  const unitCost = Number(command.unitCost ?? variant?.costPrice ?? variant?.price ?? 0);
+  const unitCost = Number(command.unitCost ?? variant.costPrice ?? variant.price ?? 0);
   const adjustmentId = safeUUID();
   const ledgerId = safeUUID();
   const operationId = `op-stock-${adjustmentId}`;
@@ -312,6 +316,24 @@ export async function queueStockAdjustment(
     synced: false,
     occurredAt,
     createdAt: occurredAt,
+  };
+
+  const adjustment: any = {
+    id: adjustmentId,
+    tenantId: command.tenantId,
+    branchId: command.branchId,
+    variantId: command.variantId,
+    adjustmentType: command.adjustmentType,
+    quantityChange: delta,
+    reason: command.reason.trim(),
+    referenceNote,
+    status: "COMPLETED",
+    createdByUserId: command.userId || "SYSTEM",
+    deviceId: command.deviceId,
+    operationId,
+    idempotencyKey,
+    createdAt: occurredAt,
+    updatedAt: new Date().toISOString(),
   };
 
   const outbox: OutboxItem = {
@@ -386,6 +408,7 @@ export async function queueStockAdjustment(
   await db.executeAtomicMutation({
     writes: [
       { store: "stockLedger", key: ledgerId, value: ledger },
+      { store: "stockAdjustments", key: adjustmentId, value: adjustment },
       { store: "productVariants", key: updatedVariant.id, value: updatedVariant },
       ...(updatedProd ? [{ store: "products" as const, key: command.productId, value: updatedProd }] : []),
     ],
@@ -429,6 +452,102 @@ export async function queueAddStock(
   });
 }
 
+function bundleComponentsForVariant(variant: any): Array<{ variantId: string; quantity: number }> | null {
+  const attributes = variant?.attributes && typeof variant.attributes === "object" ? variant.attributes : {};
+  const raw = attributes.bundleComponents;
+  if (attributes.__bundle === true || Array.isArray(raw)) {
+    if (!Array.isArray(raw) || raw.length === 0) throw new Error("BUNDLE_DEFINITION_INVALID");
+    return raw.map((component: any) => {
+      const variantId = String(component?.variantId || "").trim();
+      const quantity = Number(component?.quantity);
+      if (!variantId || !Number.isFinite(quantity) || quantity <= 0) throw new Error("BUNDLE_COMPONENT_QUANTITY_INVALID");
+      return { variantId, quantity };
+    });
+  }
+  return null;
+}
+
+function localVariantStock(db: LocalIndexedDbStore, variantId: string, tenantId: string, branchId: string): number {
+  const rows = [...db.stockLedger.values()].filter((entry: any) =>
+    entry.tenantId === tenantId && entry.branchId === branchId && entry.variantId === variantId
+  );
+  return rows.reduce((sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0), 0);
+}
+
+export function getBundleAvailableQuantity(
+  db: LocalIndexedDbStore,
+  variantId: string,
+  tenantId: string,
+  branchId: string,
+): number {
+  const variant = db.productVariants.get(variantId) as any;
+  if (!variant || variant.tenantId !== tenantId || variant.branchId !== branchId) {
+    throw new Error(`BUNDLE_VARIANT_OUT_OF_SCOPE:${variantId}`);
+  }
+  const components = bundleComponentsForVariant(variant);
+  if (!components) return Math.max(0, Math.floor(localVariantStock(db, variantId, tenantId, branchId)));
+
+  let available = Number.POSITIVE_INFINITY;
+  for (const component of components) {
+    if (component.variantId === variantId) throw new Error("BUNDLE_SELF_REFERENCE");
+    const componentVariant = db.productVariants.get(component.variantId) as any;
+    if (!componentVariant || componentVariant.tenantId !== tenantId || componentVariant.branchId !== branchId) {
+      throw new Error(`BUNDLE_COMPONENT_OUT_OF_SCOPE:${component.variantId}`);
+    }
+    if (bundleComponentsForVariant(componentVariant)) throw new Error("BUNDLE_NESTING_NOT_SUPPORTED");
+    const stock = localVariantStock(db, componentVariant.id, tenantId, branchId);
+    available = Math.min(available, Math.floor(stock / component.quantity));
+  }
+  return Number.isFinite(available) ? Math.max(0, available) : 0;
+}
+
+export function expandBundleSaleItems(
+  db: LocalIndexedDbStore,
+  items: PosSaleStockItem[],
+  tenantId: string,
+  branchId: string,
+): PosSaleStockItem[] {
+  const byVariant = new Map<string, PosSaleStockItem>();
+  for (const item of items) {
+    const variant = item.variantId ? (db.productVariants.get(item.variantId) as any) : null;
+    const components = variant ? bundleComponentsForVariant(variant) : null;
+    if (!components) {
+      const key = String(item.variantId || item.productId);
+      const previous = byVariant.get(key);
+      byVariant.set(key, previous
+        ? { ...previous, qty: Number(previous.qty) + Number(item.qty) }
+        : { ...item });
+      continue;
+    }
+
+    for (const component of components) {
+      const componentVariant = db.productVariants.get(component.variantId) as any;
+      if (!componentVariant || componentVariant.tenantId !== tenantId || componentVariant.branchId !== branchId) {
+        throw new Error(`BUNDLE_COMPONENT_OUT_OF_SCOPE:${component.variantId}`);
+      }
+      const componentProduct = db.products.get(componentVariant.productId) as any;
+      if (!componentProduct || componentProduct.tenantId !== tenantId || componentProduct.branchId !== branchId) {
+        throw new Error(`BUNDLE_COMPONENT_PRODUCT_OUT_OF_SCOPE:${componentVariant.productId}`);
+      }
+      if (bundleComponentsForVariant(componentVariant)) throw new Error("BUNDLE_NESTING_NOT_SUPPORTED");
+      const qty = Number(item.qty) * component.quantity;
+      const previous = byVariant.get(componentVariant.id);
+      byVariant.set(componentVariant.id, previous
+        ? { ...previous, qty: Number(previous.qty) + qty }
+        : {
+            productId: componentVariant.productId,
+            variantId: componentVariant.id,
+            qty,
+            unitCost: Number(componentVariant.costPrice ?? componentVariant.price ?? 0),
+            name: componentProduct.name,
+            sku: componentVariant.sku,
+            bundleParentVariantId: item.variantId,
+          });
+    }
+  }
+  return [...byVariant.values()];
+}
+
 /**
  * Records stock deductions for a completed POS checkout across variants,
  * products, and ledger, keeping POS and Inventory 100% in sync.
@@ -439,8 +558,9 @@ export async function recordPosSaleDeductions(
 ): Promise<void> {
   const { saleId, items, tenantId, branchId, userId, deviceId } = params;
   const occurredAt = new Date().toISOString();
+  const expandedItems = expandBundleSaleItems(db, items, tenantId, branchId);
 
-  for (const item of items) {
+  for (const item of expandedItems) {
     const qty = Number(item.qty);
     if (!Number.isFinite(qty) || qty <= 0) continue;
 
@@ -616,7 +736,8 @@ export async function recordPosSaleRefundRestock(
   const { saleId, items, tenantId, branchId, userId, deviceId } = params;
   const occurredAt = new Date().toISOString();
   const ctx = { tenantId, branchId };
-  for (const item of items) {
+  const expandedItems = expandBundleSaleItems(db, items, tenantId, branchId);
+  for (const item of expandedItems) {
     const returnedQty = Number(item.qty);
     if (!Number.isFinite(returnedQty) || returnedQty <= 0) continue;
     let prod = db.products.get(item.productId) as any;

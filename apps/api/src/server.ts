@@ -1,7 +1,6 @@
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { createHmac, timingSafeEqual } from "node:crypto";
 import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
@@ -20,7 +19,9 @@ import { productionCleanlinessRoutes } from "./routes/productionCleanlinessRoute
 import { registerSecurityMiddleware } from "./middleware/securityMiddleware.js";
 import { tenantExportRoutes } from "./routes/tenantExportRoutes.js";
 import { rbacRoutes } from "./routes/rbacRoutes.js";
+import { administrationRoutes } from "./routes/administrationRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
+import { CreateTaxRequestSchema } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
   const safeRelative = (relativePath || "").replace(/^\/+/, "");
@@ -94,8 +95,8 @@ import {
   OpenCashSessionRequestSchema,
   SealCashSessionCountRequestSchema,
   CloseCashSessionRequestSchema,
+  CashTransferRequestSchema,
   CreateExpenseRequestSchema,
-  ExpensePaymentMethodEnum,
   PayExpenseRequestSchema,
   VoidExpenseRequestSchema,
   CreateAccountRequestSchema,
@@ -107,9 +108,6 @@ import {
   CreateCustomerInvoiceRequestSchema,
   CreateSupplierInvoiceRequestSchema,
   AllocatePaymentRequestSchema,
-  RefundPaymentRequestSchema,
-  ReversePaymentRequestSchema,
-  PaymentReconciliationRequestSchema,
   CreateBankAccountRequestSchema,
   CreateBankTransactionRequestSchema,
   CreateBudgetRequestSchema,
@@ -212,6 +210,7 @@ import {
 
 import { SyncEngine, PrismaSyncEngine, assertSyncConflictPermission } from "@kwakopos2/sync";
 import { PrivilegedRbacMutationService, RbacMutationError } from "./services/rbacMutationService.js";
+import { requireStepUpToken } from "./services/stepUpGuard.js";
 import {
   createTraceContext,
   defaultLogger,
@@ -232,8 +231,9 @@ import {
   RunbookEngine,
   PlatformHealthEvaluator,
 } from "@kwakopos2/observability";
-import { createHash, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
 import { supportOperationsRoutes } from "./routes/supportOperationsRoutes.js";
+import { customerContactRoutes } from "./routes/customerContactRoutes.js";
 import { supportControlTowerRoutes } from "./routes/supportControlTowerRoutes.js";
 import { startSupportAutomationScheduler } from "./services/supportAutomationScheduler.js";
 import {
@@ -290,8 +290,8 @@ function resolveTenantId(req: FastifyRequest, requestedTenantId?: unknown): stri
 function requireSuperAdminContext(req: FastifyRequest): TenantContext {
   const ctx = requireTenantContext(req);
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
-  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN")) {
-    throw new Error("FORBIDDEN: Super Admin privileges required for platform release controls");
+  if (!roles.includes("PLATFORM_SUPER_ADMIN")) {
+    throw new Error("FORBIDDEN: Platform Super Admin privileges required");
   }
   return ctx;
 }
@@ -308,6 +308,28 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
   return ctx;
 }
 
+function enforceTrustedBrowserOrigin(req: FastifyRequest, config: ReturnType<typeof loadConfig>): void {
+  if (!isProductionEnv(config)) return;
+  const origin = String(req.headers.origin || "").trim();
+  if (!origin) return;
+  const allowed = (process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(",").map((value) => value.trim()).filter(Boolean)
+    : ["https://app.kwakopos.com", "https://admin.kwakopos.com"]);
+  if (!allowed.includes(origin)) throw new Error("CSRF_ORIGIN_REJECTED");
+}
+
+
+function requireCommercialPermission(req: FastifyRequest, ...required: string[]): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = (ctx.roles || []).map((r) => String(r).trim().toUpperCase());
+  const permissions = new Set((ctx.permissions || []).map((p) => String(p).trim().toLowerCase()));
+  const allowed = permissions.has("*") || permissions.has("admin:*") ||
+    roles.some((r) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) ||
+    required.some((p) => permissions.has(p.toLowerCase()));
+  if (!allowed) throw new Error("FORBIDDEN: " + required.join(" or ") + " permission required");
+  return ctx;
+}
+
 function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VIEW" | "EMPLOYEE_CREATE" | "EMPLOYEE_EDIT" | "EMPLOYEE_ARCHIVE"): TenantContext {
   const ctx = requireTenantContext(req);
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).trim().toUpperCase()) : [];
@@ -316,6 +338,17 @@ function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VI
   const compatiblePermissions = permission === "EMPLOYEE_VIEW" ? ["staff.view", "users.manage"] : ["users.manage"];
   const allowed = isOwner || permissions.has("*") || permissions.has(permission.toLowerCase()) || compatiblePermissions.some((value) => permissions.has(value)) || permissions.has("admin:*");
   if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
+  return ctx;
+}
+
+function requireWorkforcePermission(req: FastifyRequest, permission: "WORKFORCE_VIEW" | "WORKFORCE_EDIT"): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).trim().toUpperCase()) : [];
+  const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((value) => String(value).trim().toUpperCase()));
+  const isAdmin = roles.some((role) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
+  const canView = isAdmin || permissions.has("*") || permissions.has("ADMIN:*") || permissions.has("WORKFORCE_VIEW") || permissions.has("USERS.MANAGE") || permissions.has("STAFF.VIEW");
+  const canEdit = canView && (permission === "WORKFORCE_VIEW" || isAdmin || permissions.has("WORKFORCE_EDIT") || permissions.has("USERS.MANAGE") || permissions.has("STAFF.MANAGE"));
+  if (!(permission === "WORKFORCE_VIEW" ? canView : canEdit)) throw new Error("FORBIDDEN: " + permission + " permission required");
   return ctx;
 }
 
@@ -336,6 +369,64 @@ type LogoutRequestBody = { sessionId?: unknown; reason?: unknown };
 type SuperAdminSetupBody = { setupToken?: unknown; newPassword?: unknown; totpSecret?: unknown; totpCode?: unknown };
 type SuperAdminSetupStartBody = { setupToken?: unknown };
 type StepUpRequestBody = { password?: unknown; mfaCode?: unknown; action?: unknown; deviceId?: unknown };
+const BiSemanticQuerySchema = z.object({
+  queryText: z.string().trim().min(1).max(500),
+}).strict();
+
+const BiMetricDefinitionSchema = z.object({
+  metricId: z.string().trim().min(1).max(128),
+  name: z.string().trim().min(1).max(200),
+  definition: z.string().trim().min(1).max(2000),
+  formula: z.string().trim().min(1).max(2000),
+  source: z.string().trim().min(1).max(500),
+  dimensions: z.array(z.string().trim().min(1).max(100)).max(50),
+  freshness: z.enum(["REAL_TIME", "SHORT_LIVED_BATCH", "DAILY", "HISTORICAL"]),
+  owner: z.string().trim().min(1).max(200),
+}).strict();
+
+const AiAskSchema = z.object({
+  queryText: z.string().trim().min(1).max(500),
+}).strict();
+
+const AiApprovalSchema = z.object({
+  recommendationId: z.string().trim().min(1).max(128),
+}).strict();
+
+const AiKillSwitchSchema = z.object({
+  scope: z.enum(["GLOBAL", "TENANT", "AGENT", "TOOL", "FEATURE"]).default("GLOBAL"),
+  disabled: z.boolean().default(true),
+  targetId: z.string().trim().min(1).max(128).optional(),
+}).strict();
+
+const ApprovalRequestSchema = z.object({
+  subject: z.string().trim().min(1).max(300),
+  domain: z.string().trim().min(1).max(100),
+  actionCode: z.string().trim().min(1).max(150),
+  actionDescription: z.string().trim().min(1).max(2000),
+  amountValue: z.number().finite().nonnegative().optional(),
+  amountCurrency: z.string().trim().min(3).max(10).optional(),
+  businessContext: z.string().trim().min(1).max(5000),
+  evidence: z.array(z.record(z.unknown())).max(100).optional(),
+  aiAssisted: z.boolean().optional(),
+}).strict();
+
+const ApprovalDecisionSchema = z.object({
+  approvalRequestId: z.string().trim().min(1).max(128),
+  decision: z.enum(["APPROVE", "REJECT", "REQUEST_CHANGES"]),
+  comments: z.string().trim().max(2000).optional(),
+}).strict();
+
+const ApprovalActionSchema = z.object({
+  reason: z.string().trim().max(2000).optional(),
+}).strict();
+
+const ApprovalDelegationRequestSchema = z.object({
+  delegateId: z.string().trim().min(1).max(128),
+  scope: z.string().trim().min(1).max(200),
+  validFrom: z.string().datetime(),
+  validUntil: z.string().datetime(),
+  reason: z.string().trim().min(1).max(2000),
+}).strict();
 
 function configurePersistentSessions() {
   globalSessionManager.setStoreProvider({
@@ -556,7 +647,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
 
   const roleName = String(user.role?.name || "ADMIN").toUpperCase();
   const superAdminState = await getSuperAdminSecurity(user.id);
-  const isSuperAdmin = roleName === "SUPER_ADMIN" || roleName === "PLATFORM_SUPER_ADMIN" || !!superAdminState;
+  const isSuperAdmin = roleName === "PLATFORM_SUPER_ADMIN";
   if (isSuperAdmin) {
     await ensureSuperAdminSecurity(user.id);
     const state = await getSuperAdminSecurity(user.id);
@@ -743,8 +834,17 @@ function registerCanonicalProductionAuthentication(
         try {
           const ctx = verifyAccessToken(token);
           const userId = (ctx as any).userId || ctx.sub;
-          const user = await prisma.user.findUnique({ where: { id: userId } });
-          if (!user || !(await comparePassword(password, user.passwordHash))) {
+          const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
+          const roleName = String(user?.role?.name || "").toUpperCase();
+          const allowedStepUpActions = new Set(["ROLLBACK_EXECUTE", "ROLLBACK_EMERGENCY", "TENANT_PURGE", "PRODUCTION_CLEANUP", "TENANT_SUSPEND", "TENANT_REACTIVATE", "SUBSCRIPTION_CHANGE", "FEATURE_FLAG_CHANGE", "CONTEXT_SWITCH", "PLATFORM_EMERGENCY_KILL_SWITCH"]);
+          if (!allowedStepUpActions.has(action)) {
+            reply.status(400).send({ success: false, error: { code: "STEP_UP_ACTION_INVALID", message: "Unsupported step-up action." } });
+            return;
+          }
+          const securityState = user ? await getSuperAdminSecurity(userId) : null;
+          if (!user || user.status !== "ACTIVE" || roleName !== "PLATFORM_SUPER_ADMIN" ||
+              !securityState?.mfaRequired || !securityState.mfaEnrolled ||
+              !(await comparePassword(password, user.passwordHash))) {
             await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_AUTH_FAILURE", outcome: "FAILURE", metadata: { targetAction: action } });
             reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid credentials for step-up authentication" } });
             return;
@@ -926,6 +1026,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/refresh" && req.method === "POST") {
+        enforceTrustedBrowserOrigin(req, config);
         const body = (req.body || {}) as RefreshRequestBody;
         const sessionId = String(body.sessionId || "");
         const refreshToken = parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
@@ -958,6 +1059,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/logout" && req.method === "POST") {
+        enforceTrustedBrowserOrigin(req, config);
         const body = (req.body || {}) as LogoutRequestBody;
         const sessionId = String(body.sessionId || "");
         const reason = String(body.reason || "USER_LOGOUT").toUpperCase();
@@ -973,6 +1075,8 @@ function registerCanonicalProductionAuthentication(
         reply.send({ success: true, data: { loggedOut: true, reason } });
       }
     })
+
+  customerContactRoutes(server);
 
   supportOperationsRoutes(server);
     supportControlTowerRoutes(server);
@@ -1025,11 +1129,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // - allowedHeaders     → all KwakoPos context headers the client sends
   // - exposedHeaders     → headers the client JS is allowed to read from responses
   // - maxAge             → 86400 s (24 h) preflight cache to reduce OPTIONS round-trips
-  const corsOrigin = isProductionEnv(config)
-    ? (process.env.CORS_ORIGIN
-        ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
-        : ["https://app.kwakopos.com", "https://admin.kwakopos.com"])
-    : "*";
+  const configuredOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
+    : [];
+  const corsOrigin = configuredOrigins.length
+    ? configuredOrigins
+    : isProductionEnv(config)
+      ? ["https://app.kwakopos.com", "https://admin.kwakopos.com"]
+      : ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+  if (isProductionEnv(config) && corsOrigin.some((origin) => origin === "*" || !origin.startsWith("https://"))) {
+    throw new Error("SECURITY_FATAL: Production CORS origins must be explicit HTTPS origins.");
+  }
   server.register(cors, {
     origin:         corsOrigin,
     credentials:    true,
@@ -1057,7 +1168,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // H-004 + H-006: Register rate-limiting and security headers middleware
   // Must be registered BEFORE route handlers to ensure all routes are protected.
-  server.register(registerSecurityMiddleware, { isProduction: isProductionEnv(config) });
+  server.register(registerSecurityMiddleware, {
+    isProduction: isProductionEnv(config),
+    allowedOrigins: Array.isArray(corsOrigin) ? corsOrigin : [String(corsOrigin)],
+  });
 
   // Canonical production authentication boundary + distributed tracing.
   // Register this shared hook before every route so all protected production endpoints,
@@ -1136,7 +1250,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const isHtmlRequest = Boolean(req.headers.accept && req.headers.accept.includes("text/html"));
       const isWebRoute = [
         "/", "/login", "/dashboard", "/pos", "/inventory", "/customers", "/reports",
-        "/settings", "/super-admin", "/diagnostics", "/purchasing", "/finance", "/users",
+        "/settings", "/administration", "/super-admin", "/diagnostics", "/purchasing", "/finance", "/users",
         "/expenses", "/ai", "/cash-drawer", "/receipts", "/trash", "/law-firm", "/pharmacy",
         "/poultry-livestock", "/fleet", "/workforce", "/telecom", "/help"
       ].includes(url) || isHtmlRequest;
@@ -1182,7 +1296,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
             requireAdminContext(req);
           }
           if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
-            if ((req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(testUserId)) {
+            if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(testUserId)) {
               globalLegalGovernanceService.forceAcceptanceForTest(testUserId, testTenantId);
             }
             const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(testUserId, testTenantId);
@@ -1232,7 +1346,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         requireAdminContext(req);
       }
       if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
-        if ((req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(payload.sub)) {
+        if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(payload.sub)) {
           globalLegalGovernanceService.forceAcceptanceForTest(payload.sub, payload.tenantId);
         }
         const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(payload.sub, payload.tenantId);
@@ -1404,9 +1518,21 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       if (code.match(/^FINANCE_.+_VIOLATION$/) || msg.match(/FINANCE_.+_VIOLATION/))
         return [409, "FINANCIAL_CONSTRAINT_VIOLATION", "A financial constraint was violated."];
 
-      // Expense business-rule rejections are client-correctable → 400.
-      if (msg === "EXPENSE_APPROVAL_REQUIRED" || msg === "EXPENSE_ATTACHMENT_LIMIT_EXCEEDED" || msg === "EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY" || msg === "EXPENSE_INVALID_STATE_TRANSITION")
-        return [400, "BAD_REQUEST", "The Expense action violates the current workflow state."];
+      // Customer / contact / financial business rules → 400.
+      if ([
+        "CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE",
+        "PAYMENT_EXCEEDS_CUSTOMER_BALANCE",
+        "CASH_SESSION_REQUIRED",
+        "CASH_SESSION_INVALID",
+        "CUSTOMER_NOT_FOUND",
+        "CONTACT_NOT_FOUND",
+        "CONTACT_CUSTOMER_REQUIRED",
+        "SUPPLIER_NOT_FOUND",
+        "PAYMENT_AMOUNT_REQUIRED",
+        "PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED",
+        "PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE",
+      ].includes(code) || msg.toLowerCase().includes("customer_delete_blocked") || msg.toLowerCase().includes("payment_exceeds_customer_balance"))
+        return [400, "BAD_REQUEST", "A customer, contact, or financial business rule was violated."];
 
       // Business-rule invariant errors (generic INVARIANT_* prefix) → 400.
       if (
@@ -1719,6 +1845,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   traVfdRoutes(server);
   if (rbacMutationService) {
     rbacRoutes(server, { service: rbacMutationService });
+    administrationRoutes(server, { rbacService: rbacMutationService });
   }
 
   server.get("/admin/operations/freeze", async () => {
@@ -1930,7 +2057,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       userRole = record.role;
     }
 
-    if (!isProductionEnv(config) && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
+    if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
       globalLegalGovernanceService.forceAcceptanceForTest(userId, tenantId);
     }
 
@@ -2032,12 +2159,22 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const requestedBranchId = targetBranchId == null ? "" : String(targetBranchId).trim();
       const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
       const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
-      const isSuperAdmin = roles.includes("SUPER_ADMIN") || roles.includes("SUPERADMIN");
-      const canSwitchBranch = isSuperAdmin || permissions.includes("*") || permissions.includes("branch.switch");
+      const isPlatformSuperAdmin = roles.includes("PLATFORM_SUPER_ADMIN");
+      const isTenantAdmin = roles.some((role) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
+      const canSwitchBranch = !isPlatformSuperAdmin && (isTenantAdmin || permissions.includes("*") || permissions.includes("branch.switch"));
 
       const newTenantId = requestedTenantId || ctx.tenantId;
-      if (newTenantId !== ctx.tenantId && !isSuperAdmin) {
-        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Cross-tenant context switching requires Super Admin authorization." } });
+      if (isPlatformSuperAdmin) {
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: "PLATFORM_TENANT_APP_ISOLATION",
+            message: "Platform Super Admin credentials cannot enter tenant application context.",
+          },
+        });
+      }
+      if (newTenantId !== ctx.tenantId && !isTenantAdmin) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Cross-tenant context switching is not available to this account." } });
       }
       if (requestedBranchId && requestedBranchId !== ctx.branchId && !canSwitchBranch) {
         return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Branch switching permission is required." } });
@@ -2070,7 +2207,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       }
 
       const userId = ctx.userId;
-      const userEmail = (ctx as any)?.email || "admin@kwakopos.com";
+      const userEmail = String((ctx as any)?.email || "").trim();
       const tokenPayload = {
         sub: userId,
         tenantId: newTenantId,
@@ -2569,51 +2706,103 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: filtered };
   });
 
-  // Customer Management
+  // Customer Management — PostgreSQL authoritative master records.
   server.get("/api/v1/customers", async (req) => {
+    requireCommercialPermission(req, "CUSTOMER_VIEW", "customers.read");
     const customers = await commercialRepository.getCustomers(req.tenantContext!);
     return { success: true, data: customers };
   });
 
   server.post("/api/v1/customers", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "CUSTOMER_CREATE", "customers.write");
     const validated = CreateCustomerRequestSchema.parse(req.body);
-    const customer = await commercialRepository.createCustomer(req.tenantContext!, validated);
+    if (!productionPersistence) {
+      const customer = await commercialRepository.createCustomer(ctx, validated);
+      return reply.status(201).send({ success: true, data: customer });
+    }
+    const createdId = validated.id || randomUUID();
+    const customer = await prisma.$transaction(async (tx: any) => {
+      const existing = validated.id
+        ? await tx.customer.findFirst({ where: { id: validated.id, tenantId: ctx.tenantId, branchId: ctx.branchId } })
+        : null;
+      if (existing) return existing;
+      const created = await tx.customer.create({ data: {
+        id: createdId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        customerCode: validated.customerCode || `CUST-${(validated.id || createdId).slice(0, 8).toUpperCase()}`, name: validated.name,
+        phone: validated.phone || null, email: validated.email || null, address: validated.address || null,
+        creditLimit: validated.creditLimit || 0, currentBalance: validated.openingBalance || 0, openingBalance: validated.openingBalance || 0,
+        customerSegment: validated.customerSegment || null,
+        status: "ACTIVE",
+      } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_CREATED", entityType: "Customer", entityId: created.id, metadata: { customerCode: created.customerCode } } });
+      return created;
+    });
     return reply.status(201).send({ success: true, data: customer });
   });
 
   server.get("/api/v1/customers/:id", async (req, reply) => {
+    requireCommercialPermission(req, "CUSTOMER_VIEW", "customers.read");
     const customer = await commercialRepository.getCustomerById(req.tenantContext!, (req.params as any).id);
     if (!customer) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Customer not found" } });
     return { success: true, data: customer };
   });
 
   server.put("/api/v1/customers/:id", async (req) => {
+    const ctx = requireCommercialPermission(req, "CUSTOMER_EDIT", "customers.write");
     const validated = UpdateCustomerRequestSchema.parse(req.body);
-    const updated = await commercialRepository.updateCustomer(req.tenantContext!, (req.params as any).id, validated);
+    const id = (req.params as any).id;
+    const before = await commercialRepository.getCustomerById(ctx, id);
+    const updated = await commercialRepository.updateCustomer(ctx, id, validated);
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, creditLimit: before.creditLimit, customerSegment: before.customerSegment, status: before.status } : null } } });
+    }
+    return { success: true, data: updated };
+  });
+
+  server.delete("/api/v1/customers/:id", async (req) => {
+    const ctx = requireCommercialPermission(req, "CUSTOMER_EDIT", "customers.write");
+    const id = String((req.params as any).id);
+    const customer = await prisma.customer.findFirst({ where: { id, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+    if (Number(customer.currentBalance) > 0.005) throw new Error("CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE");
+    const updated = await prisma.customer.update({ where: { id }, data: { status: "INACTIVE" } });
+    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: id, metadata: { previousStatus: customer.status } } });
     return { success: true, data: updated };
   });
 
   // Supplier Management
   server.get("/api/v1/suppliers", async (req) => {
+    requireCommercialPermission(req, "SUPPLIER_VIEW", "suppliers.read");
     const suppliers = await commercialRepository.getSuppliers(req.tenantContext!);
     return { success: true, data: suppliers };
   });
 
   server.post("/api/v1/suppliers", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "SUPPLIER_CREATE", "suppliers.write");
     const validated = CreateSupplierRequestSchema.parse(req.body);
-    const supplier = await commercialRepository.createSupplier(req.tenantContext!, validated);
+    const supplier = await commercialRepository.createSupplier(ctx, validated);
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_CREATED", entityType: "Supplier", entityId: supplier.id, metadata: { supplierCode: supplier.supplierCode } } });
+    }
     return reply.status(201).send({ success: true, data: supplier });
   });
 
   server.get("/api/v1/suppliers/:id", async (req, reply) => {
+    requireCommercialPermission(req, "SUPPLIER_VIEW", "suppliers.read");
     const supplier = await commercialRepository.getSupplierById(req.tenantContext!, (req.params as any).id);
     if (!supplier) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Supplier not found" } });
     return { success: true, data: supplier };
   });
 
   server.put("/api/v1/suppliers/:id", async (req) => {
+    const ctx = requireCommercialPermission(req, "SUPPLIER_EDIT", "suppliers.write");
     const validated = UpdateSupplierRequestSchema.parse(req.body);
-    const updated = await commercialRepository.updateSupplier(req.tenantContext!, (req.params as any).id, validated);
+    const id = String((req.params as any).id);
+    const before = await commercialRepository.getSupplierById(ctx, id);
+    const updated = await commercialRepository.updateSupplier(ctx, id, validated);
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, taxPin: before.taxPin, status: before.status } : null } } });
+    }
     return { success: true, data: updated };
   });
 
@@ -2648,59 +2837,6 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: result });
   });
 
-  server.get("/api/v1/purchases/returns", async (req) => {
-    return { success: true, data: await commercialRepository.getPurchaseReturns(req.tenantContext!) };
-  });
-
-  server.post("/api/v1/purchases/returns", async (req, reply) => {
-    const body = z.object({
-      id: z.string().uuid().optional(),
-      supplierId: z.string().uuid(),
-      purchaseReceiptId: z.string().uuid(),
-      returnNumber: z.string().min(1).optional(),
-      reason: z.string().min(1),
-      deviceId: z.string().min(1).optional(),
-      operationId: z.string().min(1).optional(),
-      idempotencyKey: z.string().min(1).optional(),
-      items: z.array(z.object({
-        id: z.string().uuid().optional(), variantId: z.string().uuid(), quantityReturned: z.number().positive(),
-        unitCost: z.number().nonnegative().optional(), condition: z.enum(["GOOD", "DAMAGED", "DEFECTIVE"]).optional(),
-      })).min(1),
-    }).parse(req.body);
-    const result = await commercialRepository.createPurchaseReturn(req.tenantContext!, body);
-    return reply.status(201).send({ success: true, data: result });
-  });
-
-  server.get("/api/v1/purchases/history", async (req) => {
-    const [orders, receipts, returns, invoices] = await Promise.all([
-      commercialRepository.getPurchaseOrders(req.tenantContext!),
-      commercialRepository.getPurchaseReceipts(req.tenantContext!),
-      commercialRepository.getPurchaseReturns(req.tenantContext!),
-      financeRepository.getSupplierInvoices(req.tenantContext!),
-    ]);
-    return { success: true, data: { orders, receipts, returns, invoices } };
-  });
-
-  server.get("/api/v1/purchases/reports", async (req) => {
-    const query = (req.query as any) || {};
-    const to = query.to ? new Date(query.to) : new Date();
-    const from = query.from ? new Date(query.from) : new Date(to.getTime() - 30 * 86400000);
-    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from > to) throw new Error("PURCHASE_REPORT_DATE_RANGE_INVALID");
-    const [orders, receipts, returns, invoices, suppliers] = await Promise.all([
-      commercialRepository.getPurchaseOrders(req.tenantContext!),
-      commercialRepository.getPurchaseReceipts(req.tenantContext!),
-      commercialRepository.getPurchaseReturns(req.tenantContext!),
-      financeRepository.getSupplierInvoices(req.tenantContext!),
-      commercialRepository.getSuppliers(req.tenantContext!),
-    ]);
-    const inRange = (value: any) => { const d = new Date(value); return d >= from && d <= to; };
-    const purchaseValue = orders.filter((x:any) => inRange(x.createdAt)).reduce((s:number,x:any)=>s+Number(x.totalAmount||0),0);
-    const receivedValue = receipts.filter((x:any) => inRange(x.receivedAt)).reduce((s:number,x:any)=>s+(x.items||[]).reduce((n:number,i:any)=>n+Number(i.totalCost||0),0),0);
-    const returnValue = returns.filter((x:any) => inRange(x.createdAt)).reduce((s:number,x:any)=>s+Number(x.totalRefundAmount||0),0);
-    const invoicedValue = invoices.filter((x:any) => inRange(x.invoiceDate)).reduce((s:number,x:any)=>s+Number(x.grandTotal||0),0);
-    return { success: true, data: { from: from.toISOString(), to: to.toISOString(), purchaseValue, receivedValue, returnValue, invoicedValue, outstandingPayable: suppliers.reduce((s:number,x:any)=>s+Number(x.outstandingBalance||0),0), orderCount: orders.length, receiptCount: receipts.length, returnCount: returns.length, invoiceCount: invoices.length } };
-  });
-
   server.post("/api/v1/finance/payables/settle-supplier", async (req, reply) => {
     const body = z.object({
       supplierId: z.string().uuid(), amount: z.number().positive(),
@@ -2713,113 +2849,90 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // POS Sales Engine
+  const assertSalesAuthority = (req: any, action: "view" | "create" | "void" | "return") => {
+    const ctx = requireTenantContext(req);
+    const raw = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim()) : [];
+    const permissions = new Set(raw.map((p) => p.toUpperCase()));
+    const permissionsLower = new Set(raw.map((p) => p.toLowerCase()));
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const manager = roles.some((r: string) => ["MANAGER", "BRANCH_MANAGER"].includes(r));
+    const wildcard = permissions.has("*") || permissionsLower.has("*") || permissionsLower.has("sales.*");
+    const allowedByAction: Record<string, boolean> = {
+      view: permissions.has("SALE_VIEW") || permissions.has("SALE_CREATE") || permissionsLower.has("sales.view") || permissionsLower.has("sales.create"),
+      create: permissions.has("SALE_CREATE") || permissionsLower.has("sales.create"),
+      void: permissions.has("SALE_VOID") || permissionsLower.has("sales.void") || permissionsLower.has("sales.cancel"),
+      return: permissions.has("SALE_RETURN") || permissions.has("PAYMENT_REFUND") || permissionsLower.has("sales.return") || permissionsLower.has("sales.refund"),
+    };
+    if (!(admin || manager || wildcard || allowedByAction[action])) throw new Error(`FORBIDDEN: SALE_${action.toUpperCase()} required`);
+    return ctx;
+  };
+
   server.get("/api/v1/pos/sales", async (req) => {
-    const sales = await commercialRepository.getSales(req.tenantContext!);
+    const ctx = assertSalesAuthority(req, "view");
+    const sales = await commercialRepository.getSales(ctx);
     return { success: true, data: sales };
   });
 
   server.post("/api/v1/pos/sales", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "create");
     const validated = CreatePosSaleRequestSchema.parse(req.body);
+    const discountRequested = Number(validated.discountTotal || 0) > 0 || validated.items.some((x: any) => Number(x.discountAmount || 0) > 0);
+    if (discountRequested) {
+      const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim()) : [];
+      const upperPermissions = new Set(permissions.map((p) => p.toUpperCase()));
+      const lowerPermissions = new Set(permissions.map((p) => p.toLowerCase()));
+      const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+      const manager = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+      if (!(manager || upperPermissions.has("*") || lowerPermissions.has("*") || upperPermissions.has("DISCOUNT_MANAGE") || lowerPermissions.has("discount.manage") || lowerPermissions.has("sales.discount"))) {
+        throw new Error("FORBIDDEN: DISCOUNT_MANAGE required for sale discounts");
+      }
+    }
     const result = atomicCommercialFinance
-      ? await atomicCommercialFinance.createSale(req.tenantContext!, validated)
-      : await commercialRepository.createPosSale(req.tenantContext!, validated);
+      ? await atomicCommercialFinance.createSale(ctx, validated)
+      : await commercialRepository.createPosSale(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/pos/sales/:id", async (req, reply) => {
-    const sale = await commercialRepository.getSaleById(req.tenantContext!, (req.params as any).id);
+    const ctx = assertSalesAuthority(req, "view");
+    const sale = await commercialRepository.getSaleById(ctx, (req.params as any).id);
     if (!sale) {
       return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Sale not found" } });
     }
     return { success: true, data: sale };
   });
 
-  // Returns & Refunds
-  server.post("/api/v1/returns", async (req, reply) => {
-    const validated = CreateSaleReturnRequestSchema.parse(req.body);
-    const result = await commercialRepository.createSaleReturn(req.tenantContext!, validated);
-    return reply.status(201).send({ success: true, data: result });
-  });
-
-  const assertPaymentAuthority = (req: any, permission: "view" | "refund" | "reconcile") => {
-    const ctx = requireTenantContext(req);
-    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
-    const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
-    const isAdmin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
-    const hasWildcard = permissions.includes("*");
-    const required = permission === "refund" ? "PAYMENT_REFUND" : permission === "reconcile" ? "PAYMENT_RECONCILE" : "PAYMENT_VIEW";
-    if (!(isAdmin || hasWildcard || permissions.includes(required))) throw new Error("FORBIDDEN: Payment authority required");
-    return ctx;
-  };
-
-  server.post("/api/v1/payments/:id/reverse", async (req, reply) => {
-    assertPaymentAuthority(req, "refund");
-    const body = ReversePaymentRequestSchema.parse(req.body);
-    const result = await commercialRepository.reversePayment(req.tenantContext!, (req.params as any).id, body);
-    return reply.status(201).send({ success: true, data: result });
-  });
-
-  server.post("/api/v1/payments/:id/refund", async (req, reply) => {
-    assertPaymentAuthority(req, "refund");
-    const body = RefundPaymentRequestSchema.parse(req.body);
-    const result = await commercialRepository.refundPayment(req.tenantContext!, (req.params as any).id, body);
-    return reply.status(201).send({ success: true, data: result });
-  });
-
-  server.get("/api/v1/payments/reports/channels", async (req) => {
-    assertPaymentAuthority(req, "view");
-    const query: any = req.query || {};
-    const from = query.from ? new Date(query.from) : new Date(new Date().setHours(0, 0, 0, 0));
-    const to = query.to ? new Date(query.to) : new Date();
-    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error("PAYMENT_REPORT_PERIOD_INVALID");
-    const report = await commercialRepository.getPaymentChannelReport(req.tenantContext!, from, to);
-    return { success: true, data: report };
-  });
-
-  server.post("/api/v1/payments/reconcile", async (req) => {
-    assertPaymentAuthority(req, "reconcile");
-    const body = PaymentReconciliationRequestSchema.parse(req.body);
-    return { success: true, data: await commercialRepository.reconcilePayments(req.tenantContext!, body) };
-  });
-
-  server.post("/api/v1/payments/webhooks/:provider", async (req, reply) => {
-    const body: any = req.body || {};
-    const paymentId = String(body.paymentId || "");
-    const providerEventId = String(body.providerEventId || body.eventId || "");
-    const provider = String((req.params as any).provider || "").toUpperCase();
-    if (!paymentId || !providerEventId || !provider) return reply.status(400).send({ success: false, error: "PAYMENT_WEBHOOK_FIELDS_REQUIRED" });
-
-    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
-    if (!payment) return reply.status(404).send({ success: false, error: "PAYMENT_NOT_FOUND" });
-
-    const secretRow = await prisma.setting.findFirst({
-      where: { tenantId: payment.tenantId, branchId: payment.branchId, scope: "BRANCH", key: `payment.webhookSecret.${provider}`, isActive: true },
-      orderBy: { updatedAt: "desc" },
-    });
-    const secret = secretRow?.value && typeof secretRow.value === "object" ? String((secretRow.value as any).secret || "") : "";
-    const supplied = String(req.headers["x-payment-signature"] || "").trim().toLowerCase();
-    if (!secret || !supplied) return reply.status(401).send({ success: false, error: "PAYMENT_WEBHOOK_SIGNATURE_REQUIRED" });
-    const expected = createHmac("sha256", secret).update(JSON.stringify(body)).digest("hex");
-    const valid = supplied.length === expected.length && timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
-    if (!valid) return reply.status(401).send({ success: false, error: "PAYMENT_WEBHOOK_SIGNATURE_INVALID" });
-
-    const systemUserId = "00000000-0000-0000-0000-000000000000";
-    const ctx = { tenantId: payment.tenantId, branchId: payment.branchId, userId: systemUserId, roles: ["SYSTEM"], permissions: ["*"] } as TenantContext;
-    const result = await commercialRepository.confirmProviderPayment(ctx, payment.id, {
-      amount: Number(body.amount),
-      provider,
-      providerReference: body.providerReference || body.reference,
-      providerEventId,
-      externalReference: body.externalReference || providerEventId,
-    });
+  server.post("/api/v1/pos/sales/:id/void", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "void");
+    if (!atomicCommercialFinance) throw new Error("SALE_VOID_REQUIRES_POSTGRESQL_AUTHORITY");
+    const body = z.object({ reason: z.string().trim().min(3).max(500), operationId: z.string().min(1).max(200).optional(), idempotencyKey: z.string().min(1).max(200).optional(), deviceId: z.string().min(1).max(128).optional() }).parse(req.body);
+    const result = await atomicCommercialFinance.voidSale(ctx, String((req.params as any).id), body.reason, body);
     return reply.status(200).send({ success: true, data: result });
   });
 
-  const assertCashDrawerAuthority = (req: any, permission: "open" | "close" | "move") => {
+  // Returns & Refunds
+  server.post("/api/v1/returns", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "return");
+    const rawPermissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const refundAuthority = rawPermissions.includes("payment_refund") || rawPermissions.includes("sales.refund") || rawPermissions.includes("sales.return") ||
+      roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+    if (!refundAuthority) throw new Error("FORBIDDEN: PAYMENT_REFUND required for financial return");
+    const validated = CreateSaleReturnRequestSchema.parse(req.body);
+    const result = await commercialRepository.createSaleReturn(ctx, validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  const assertCashDrawerAuthority = (req: any, permission: "view" | "open" | "close" | "move" | "approve") => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
-    const allowed = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
+    const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const canView = admin || permissions.includes("*") || permissions.includes("cashdrawer.view") || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close") || permissions.includes("cashdrawer.move") || permissions.includes("cashdrawer.approve");
+    const allowed = permission === "view"
+      ? canView
+      : admin || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
     if (!allowed) throw new Error("FORBIDDEN: Cash drawer authority required");
     return ctx;
   };
@@ -2829,6 +2942,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return {
       ...expense,
       amount: Number(expense.amount),
+      employeeId: expense.employeeId || null,
       incurredAt: expense.incurredAt instanceof Date ? expense.incurredAt.toISOString() : expense.incurredAt,
       createdAt: expense.createdAt instanceof Date ? expense.createdAt.toISOString() : expense.createdAt,
       updatedAt: expense.updatedAt instanceof Date ? expense.updatedAt.toISOString() : expense.updatedAt,
@@ -2837,162 +2951,39 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     };
   };
 
-  const assertExpenseAuthority = (req: any, action: "view" | "create" | "approve" | "void") => {
+  const assertExpenseAuthority = (req: any, action: "view" | "create" | "void") => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
     const isAdmin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
     const hasWildcard = permissions.includes("*");
-    const canView = isAdmin || hasWildcard || permissions.includes("FINANCE_VIEW") || permissions.includes("FINANCE_CREATE");
-    const canCreate = isAdmin || hasWildcard || permissions.includes("FINANCE_CREATE");
-    const canApprove = isAdmin || hasWildcard || permissions.includes("FINANCE_APPROVE") || permissions.includes("FINANCE_CREATE");
+    const canView = isAdmin || hasWildcard || permissions.includes("FINANCE_VIEW") || permissions.includes("FINANCE_CREATE") || permissions.includes("WORKFORCE_VIEW");
+    const canCreate = isAdmin || hasWildcard || permissions.includes("FINANCE_CREATE") || permissions.includes("WORKFORCE_EDIT");
     const canVoid = isAdmin || hasWildcard || permissions.includes("JOURNAL_REVERSE");
-    const allowed = action === "view" ? canView : action === "create" ? canCreate : action === "approve" ? canApprove : canVoid;
+    const allowed = action === "view" ? canView : action === "create" ? canCreate : canVoid;
     if (!allowed) throw new Error("FORBIDDEN: Expense finance permission required");
     return ctx;
   };
 
-  // Expense production control plane: category/vendor master, approvals, attachments, recurring spend, reports, ledger and audit.
-  server.get("/api/v1/expenses/categories", async (req) => {
-    const ctx = assertExpenseAuthority(req, "view");
-    const categories = await prisma.expenseCategory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ isActive: "desc" }, { name: "asc" }] });
-    return { success: true, data: { categories } };
-  });
-  server.post("/api/v1/expenses/categories", async (req, reply) => {
-    const ctx = assertExpenseAuthority(req, "create");
-    const body = z.object({ code: z.string().trim().min(2).max(40), name: z.string().trim().min(2).max(160), description: z.string().trim().max(500).optional() }).parse(req.body);
-    const category = await prisma.expenseCategory.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, code: body.code.toUpperCase(), name: body.name, description: body.description || null } });
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "EXPENSE_CATEGORY_CREATED", entityType: "ExpenseCategory", entityId: category.id, metadata: { code: category.code } } });
-    return reply.status(201).send({ success: true, data: category });
-  });
-  server.patch("/api/v1/expenses/categories/:id", async (req) => {
-    const ctx = assertExpenseAuthority(req, "create");
-    const body = z.object({ name: z.string().trim().min(2).max(160).optional(), description: z.string().trim().max(500).nullable().optional(), isActive: z.boolean().optional() }).parse(req.body);
-    const existing = await prisma.expenseCategory.findFirst({ where: { id: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    if (!existing) throw new Error("EXPENSE_CATEGORY_NOT_FOUND");
-    const updated = await prisma.expenseCategory.update({ where: { id: existing.id }, data: body });
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "EXPENSE_CATEGORY_UPDATED", entityType: "ExpenseCategory", entityId: existing.id, metadata: body } });
-    return { success: true, data: updated };
-  });
-
-  server.get("/api/v1/expenses/vendors", async (req) => {
-    const ctx = assertExpenseAuthority(req, "view");
-    const vendors = await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { name: "asc" } });
-    return { success: true, data: { vendors } };
-  });
-  server.post("/api/v1/expenses/vendors", async (req, reply) => {
-    const ctx = assertExpenseAuthority(req, "create");
-    const body = z.object({ supplierCode: z.string().trim().min(2).max(80), name: z.string().trim().min(2).max(200), phone: z.string().trim().max(60).optional(), email: z.string().email().optional(), address: z.string().trim().max(500).optional(), taxPin: z.string().trim().max(100).optional() }).parse(req.body);
-    const vendor = await prisma.supplier.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, supplierCode: body.supplierCode, name: body.name, phone: body.phone || null, email: body.email || null, address: body.address || null, taxPin: body.taxPin || null } });
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "EXPENSE_VENDOR_CREATED", entityType: "Supplier", entityId: vendor.id, metadata: { supplierCode: vendor.supplierCode } } });
-    return reply.status(201).send({ success: true, data: vendor });
-  });
-  server.patch("/api/v1/expenses/vendors/:id", async (req) => {
-    const ctx = assertExpenseAuthority(req, "create");
-    const body = z.object({ name: z.string().trim().min(2).max(200).optional(), phone: z.string().trim().max(60).nullable().optional(), email: z.string().email().nullable().optional(), address: z.string().trim().max(500).nullable().optional(), taxPin: z.string().trim().max(100).nullable().optional(), status: z.string().optional() }).parse(req.body);
-    const existing = await prisma.supplier.findFirst({ where: { id: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    if (!existing) throw new Error("EXPENSE_VENDOR_NOT_FOUND");
-    const updated = await prisma.supplier.update({ where: { id: existing.id }, data: body });
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "EXPENSE_VENDOR_UPDATED", entityType: "Supplier", entityId: existing.id, metadata: body } });
-    return { success: true, data: updated };
-  });
-
-  server.get("/api/v1/expenses/approvals", async (req) => {
-    const ctx = assertExpenseAuthority(req, "view");
-    const approvals = await prisma.expenseApproval.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, status: "PENDING" }, include: { expense: true }, orderBy: { createdAt: "asc" } });
-    return { success: true, data: approvals };
-  });
-  server.post("/api/v1/expenses/approvals/:id/approve", async (req) => {
-    const ctx = assertExpenseAuthority(req, "approve");
-    const body = z.object({ reason: z.string().trim().max(500).optional(), idempotencyKey: z.string().min(1).optional() }).parse(req.body);
-    const expense = await atomicCommercialFinance!.approveExpense(ctx, String((req.params as any).id), body.reason || "Approved by finance");
-    return { success: true, data: normalizeExpenseResponse(expense) };
-  });
-  server.post("/api/v1/expenses/approvals/:id/reject", async (req) => {
-    const ctx = assertExpenseAuthority(req, "approve");
-    const body = z.object({ reason: z.string().trim().min(3).max(500), idempotencyKey: z.string().min(1).optional() }).parse(req.body);
-    const expense = await atomicCommercialFinance!.rejectExpense(ctx, String((req.params as any).id), body.reason);
-    return { success: true, data: normalizeExpenseResponse(expense) };
-  });
-
-  server.get("/api/v1/expenses/recurring", async (req) => {
-    const ctx = assertExpenseAuthority(req, "view");
-    const rows = await prisma.recurringExpense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { nextRunAt: "asc" } });
-    return { success: true, data: rows };
-  });
-  server.post("/api/v1/expenses/recurring", async (req, reply) => {
-    const ctx = assertExpenseAuthority(req, "create");
-    const body = z.object({ categoryId: z.string().uuid().optional(), vendorId: z.string().uuid().optional(), category: z.string().trim().min(1), amount: z.number().positive(), reason: z.string().min(1), description: z.string().min(1), payee: z.string().min(1), paymentMethod: ExpensePaymentMethodEnum.default("BANK"), taxDeductible: z.boolean().default(false), frequency: z.enum(["WEEKLY","MONTHLY","QUARTERLY"]), nextRunAt: z.string().datetime(), idempotencyKey: z.string().min(1).optional() }).parse(req.body);
-    if (body.categoryId && !await prisma.expenseCategory.findFirst({ where: { id: body.categoryId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } })) throw new Error("EXPENSE_CATEGORY_NOT_FOUND");
-    if (body.vendorId && !await prisma.supplier.findFirst({ where: { id: body.vendorId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } })) throw new Error("EXPENSE_VENDOR_NOT_FOUND");
-    const row = await prisma.recurringExpense.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, ...body, categoryId: body.categoryId || null, vendorId: body.vendorId || null, idempotencyKey: body.idempotencyKey || randomUUID(), createdById: ctx.userId } });
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "RECURRING_EXPENSE_CREATED", entityType: "RecurringExpense", entityId: row.id, metadata: { frequency: row.frequency, nextRunAt: row.nextRunAt.toISOString() } } });
-    return reply.status(201).send({ success: true, data: row });
-  });
-  server.post("/api/v1/expenses/recurring/:id/run", async (req, reply) => {
-    const ctx = assertExpenseAuthority(req, "create");
-    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
-    const row = await prisma.recurringExpense.findFirst({ where: { id: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId, active: true } });
-    if (!row) throw new Error("RECURRING_EXPENSE_NOT_FOUND");
-    const runKey = `recurring-expense-${row.id}-${row.nextRunAt.toISOString()}`;
-    const expense = await atomicCommercialFinance.recordExpense(ctx, { id: randomUUID(), categoryId: row.categoryId || undefined, vendorId: row.vendorId || undefined, category: row.category, amount: Number(row.amount), reason: row.reason, description: row.description, payee: row.payee, paymentMethod: row.paymentMethod, status: "PENDING", taxDeductible: row.taxDeductible, incurredAt: row.nextRunAt.toISOString(), idempotencyKey: runKey, deviceId: String(req.headers["x-device-id"] || "web"), recurringExpenseId: row.id });
-    const next = new Date(row.nextRunAt);
-    if (row.frequency === "WEEKLY") next.setDate(next.getDate()+7); else if (row.frequency === "QUARTERLY") next.setMonth(next.getMonth()+3); else next.setMonth(next.getMonth()+1);
-    await prisma.recurringExpense.update({ where: { id: row.id }, data: { lastRunAt: row.nextRunAt, nextRunAt: next } });
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "RECURRING_EXPENSE_MATERIALIZED", entityType: "RecurringExpense", entityId: row.id, metadata: { expenseId: expense.id, runKey } } });
-    return reply.status(201).send({ success: true, data: normalizeExpenseResponse(expense) });
-  });
-
-  server.post("/api/v1/expenses/:id/attachments", async (req, reply) => {
-    const ctx = assertExpenseAuthority(req, "create");
-    const body = z.object({ fileName: z.string().trim().min(1).max(255), mimeType: z.string().trim().min(1).max(120), contentBase64: z.string().min(1).max(7000000) }).parse(req.body);
-    const expense = await prisma.expense.findFirst({ where: { id: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    if (!expense) throw new Error("EXPENSE_NOT_FOUND");
-    const buffer = Buffer.from(body.contentBase64, "base64");
-    if (!buffer.length || buffer.length > 5 * 1024 * 1024) throw new Error("EXPENSE_ATTACHMENT_LIMIT_EXCEEDED");
-    const sha256 = createHash("sha256").update(buffer).digest("hex");
-    const existing = await prisma.expenseAttachment.findFirst({ where: { expenseId: expense.id, sha256 } });
-    if (existing) return reply.status(200).send({ success: true, data: existing });
-    const attachment = await prisma.expenseAttachment.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, expenseId: expense.id, fileName: body.fileName, mimeType: body.mimeType, sizeBytes: buffer.length, sha256, contentBase64: body.contentBase64, createdById: ctx.userId } });
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "EXPENSE_ATTACHMENT_ADDED", entityType: "Expense", entityId: expense.id, metadata: { attachmentId: attachment.id, fileName: attachment.fileName, sizeBytes: attachment.sizeBytes, sha256 } } });
-    return reply.status(201).send({ success: true, data: { ...attachment, contentBase64: undefined } });
-  });
-  server.get("/api/v1/expenses/:id/attachments", async (req) => {
-    const ctx = assertExpenseAuthority(req, "view");
-    const rows = await prisma.expenseAttachment.findMany({ where: { expenseId: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id:true,fileName:true,mimeType:true,sizeBytes:true,sha256:true,createdAt:true } });
-    return { success: true, data: rows };
-  });
-  server.get("/api/v1/expenses/:id/attachments/:attachmentId/content", async (req) => {
-    const ctx = assertExpenseAuthority(req, "view");
-    const attachment = await prisma.expenseAttachment.findFirst({ where: { id: String((req.params as any).attachmentId), expenseId: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    if (!attachment) throw new Error("EXPENSE_ATTACHMENT_NOT_FOUND");
-    return { success: true, data: { fileName: attachment.fileName, mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes, contentBase64: attachment.contentBase64 || "" } };
-  });
-
-  server.get("/api/v1/expenses/reports", async (req) => {
-    const ctx = assertExpenseAuthority(req, "view");
-    const query = req.query as any;
-    const from = query.from ? new Date(query.from) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const to = query.to ? new Date(query.to) : new Date();
-    const rows = await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, incurredAt: { gte: from, lte: to } } });
-    const active = rows.filter(x=>x.status!=="VOIDED");
-    const sum=(xs:any[])=>xs.reduce((s,x)=>s+Number(x.amount),0);
-    const group=(field:string)=>Object.entries(rows.reduce((m:any,x:any)=>{const k=String(x[field]||"Unspecified");m[k]=(m[k]||0)+Number(x.amount);return m;},{})).map(([k,v])=>({[field]:k,amount:v}));
-    return { success:true, data:{summary:{total:sum(active),paid:sum(active.filter(x=>x.status==="PAID")),pending:sum(active.filter(x=>x.status==="PENDING")),voided:sum(rows.filter(x=>x.status==="VOIDED")),taxDeductible:sum(active.filter(x=>x.taxDeductible))},byCategory:group("category"),byVendor:group("payee"),from:from.toISOString(),to:to.toISOString()}};
-  });
-  server.get("/api/v1/expenses/ledger", async (req) => {
-    const ctx = assertExpenseAuthority(req, "view");
-    const rows = await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy:{incurredAt:"desc"} });
-    const ids=rows.map(r=>r.id); const journals=ids.length?await prisma.journalEntry.findMany({where:{tenantId:ctx.tenantId,branchId:ctx.branchId,sourceId:{in:ids}},select:{id: true,journalNumber:true,sourceId:true,sourceType:true,totalDebit:true,totalCredit:true,status:true}}):[];
-    const map=new Map(journals.map(j=>[j.sourceId,j])); return {success:true,data:rows.map(r=>({...normalizeExpenseResponse(r),journalNumber:map.get(r.id)?.journalNumber||null,journalStatus:map.get(r.id)?.status||null}))};
-  });
-  server.get("/api/v1/expenses/audit", async (req) => {
-    const ctx = assertExpenseAuthority(req, "view");
-    const rows = await prisma.auditEvent.findMany({ where:{tenantId:ctx.tenantId,branchId:ctx.branchId,entityType:"Expense"},orderBy:{createdAt:"desc"},take:500 });
-    return {success:true,data:rows};
-  });
-
   // Cash Sessions & Drawer Reconciliation
+  server.get("/api/v1/cash-registers", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    return { success: true, data: await commercialRepository.listCashRegisters(req.tenantContext!) };
+  });
+
+  server.get("/api/v1/cash-sessions", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    const query = (req.query as any) || {};
+    return {
+      success: true,
+      data: await commercialRepository.listCashSessions(
+        req.tenantContext!,
+        query.status ? String(query.status) : undefined,
+        Number(query.limit || 100),
+      ),
+    };
+  });
+
   server.post("/api/v1/cash-sessions", async (req, reply) => {
     assertCashDrawerAuthority(req, "open");
     const validated = OpenCashSessionRequestSchema.parse(req.body);
@@ -3001,7 +2992,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/v1/cash-sessions/active", async (req) => {
-    const session = await commercialRepository.getActiveCashSession(req.tenantContext!);
+    assertCashDrawerAuthority(req, "view");
+    const registerCode = String((req.query as any)?.registerCode || "").trim() || undefined;
+    const session = await commercialRepository.getActiveCashSession(req.tenantContext!, registerCode);
     return { success: true, data: session || null };
   });
 
@@ -3080,6 +3073,26 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: movement });
   });
 
+  server.post("/api/v1/cash-sessions/:id/transfer", async (req, reply) => {
+    assertCashDrawerAuthority(req, "move");
+    if (!productionPersistence) throw new Error("CASH_TRANSFER_REQUIRES_POSTGRESQL_AUTHORITY");
+    const validated = CashTransferRequestSchema.parse(req.body);
+    const result = await commercialRepository.transferCash(req.tenantContext!, String((req.params as any).id), validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/cash-sessions/:id/payment-channel-reconciliation", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    if (!productionPersistence) throw new Error("PAYMENT_CHANNEL_RECONCILIATION_REQUIRES_POSTGRESQL_AUTHORITY");
+    return { success: true, data: await commercialRepository.getPaymentChannelReconciliation(req.tenantContext!, String((req.params as any).id)) };
+  });
+
+  server.get("/api/v1/cash-sessions/:id/audit-trail", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    if (!productionPersistence) throw new Error("CASH_AUDIT_TRAIL_REQUIRES_POSTGRESQL_AUTHORITY");
+    return { success: true, data: await commercialRepository.getCashAuditTrail(req.tenantContext!, String((req.params as any).id)) };
+  });
+
   server.post("/api/v1/drawer-operations/:id/execute", async (req) => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
@@ -3155,7 +3168,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     }
     if (start >= end) throw new Error("REPORT_INVALID_DATE_RANGE");
 
-    const requestedBranch = query.branchId ? String(query.branchId) : null;
+    const allBranches = String(query.allBranches || "").toLowerCase() === "true";
+    const requestedBranch = allBranches ? null : (query.branchId ? String(query.branchId) : ctx.branchId);
     const data = await commercialRepository.getReportsData(ctx, { from: start, to: end, branchId: requestedBranch });
     return { success: true, data };
   });
@@ -3190,6 +3204,108 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     };
   });
 
+  const assertFinanceAuthority = (req: any, action: "view" | "create" | "reverse" | "close" | "admin" = "view") => {
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const permissions = new Set((ctx.permissions || []).map((p: any) => String(p).toLowerCase()));
+    const privileged = roles.some((r: string) => ["OWNER","ADMIN","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    const wildcard = permissions.has("*") || permissions.has("admin:*");
+    const rules: Record<string,string[]> = {
+      view: ["finance.view","finance.create","financial_reports.view"],
+      create: ["finance.create","finance.manage","journal.create"],
+      reverse: ["finance.manage","journal.reverse"],
+      close: ["finance.manage","finance.period.close"],
+      admin: ["finance.manage"],
+    };
+    if (!(privileged || wildcard || rules[action].some((p) => permissions.has(p)))) throw new Error("FORBIDDEN: Finance permission required");
+    return ctx;
+  };
+
+  // PostgreSQL-authoritative Tax / TRA fiscal compliance report.
+  server.get("/api/v1/finance/tax-compliance", async (req) => {
+    const ctx = assertFinanceAuthority(req, "view");
+    const query = (req.query as any) || {};
+    const now = new Date();
+    const end = query.to ? new Date(String(query.to)) : now;
+    if (!Number.isFinite(end.getTime())) throw new Error("TAX_REPORT_INVALID_TO_DATE");
+    let start = query.from ? new Date(String(query.from)) : new Date(end);
+    if (!Number.isFinite(start.getTime())) throw new Error("TAX_REPORT_INVALID_FROM_DATE");
+    const range = String(query.range || "").toLowerCase();
+    if (!query.from) {
+      const d = new Date(end);
+      if (range === "today") d.setHours(0, 0, 0, 0);
+      else if (range === "this_week") {
+        const day = d.getDay(); d.setDate(d.getDate() - (day === 0 ? 6 : day - 1)); d.setHours(0, 0, 0, 0);
+      } else if (range === "this_month") {
+        d.setDate(1); d.setHours(0, 0, 0, 0);
+      } else if (range === "this_quarter") {
+        d.setMonth(Math.floor(d.getMonth() / 3) * 3, 1); d.setHours(0, 0, 0, 0);
+      } else if (range === "this_year") {
+        d.setMonth(0, 1); d.setHours(0, 0, 0, 0);
+      } else {
+        d.setDate(1); d.setHours(0, 0, 0, 0);
+      }
+      start = d;
+    }
+    if (start >= end) throw new Error("TAX_REPORT_INVALID_DATE_RANGE");
+    const allBranches = String(query.allBranches || "").toLowerCase() === "true";
+    const requestedBranch = allBranches ? null : (query.branchId ? String(query.branchId) : ctx.branchId);
+    const branchScope = requestedBranch ? { tenantId: ctx.tenantId, branchId: requestedBranch } : { tenantId: ctx.tenantId };
+    const [sales, fiscalizations, configRows] = await Promise.all([
+      prisma.sale.findMany({ where: { ...branchScope, soldAt: { gte: start, lte: end }, status: { notIn: ["CANCELLED", "VOIDED", "REFUNDED"] } }, orderBy: { soldAt: "asc" } }),
+      prisma.traVfdFiscalization.findMany({ where: { ...branchScope, createdAt: { gte: start, lte: end } }, orderBy: { createdAt: "asc" } }),
+      prisma.setting.findMany({ where: { ...branchScope, scope: "BRANCH", key: "tax.config", isActive: true }, orderBy: { updatedAt: "desc" } }),
+    ]);
+    const fiscalByTransaction = new Map<string, any>();
+    for (const fiscal of fiscalizations) {
+      const existing = fiscalByTransaction.get(fiscal.transactionId);
+      if (!existing || new Date(fiscal.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) fiscalByTransaction.set(fiscal.transactionId, fiscal);
+    }
+    const rows = sales.map((sale: any) => {
+      const fiscal = fiscalByTransaction.get(sale.id) || fiscalByTransaction.get(sale.saleNumber);
+      const netAmount = Number(sale.subtotal), taxAmount = Number(sale.taxTotal), grossAmount = Number(sale.grandTotal);
+      return {
+        id: sale.id, tenantId: sale.tenantId, branchId: sale.branchId, receiptRef: sale.saleNumber, transactionId: sale.id,
+        date: sale.soldAt.toISOString(), netAmount, taxAmount, grossAmount,
+        taxRate: netAmount > 0 && taxAmount > 0 ? Number(((taxAmount / netAmount) * 100).toFixed(4)) : 0,
+        fiscalState: fiscal?.state || "NOT_APPLICABLE",
+        fiscalReceiptNumber: fiscal?.fiscalReceiptNumber || null, fiscalCode: fiscal?.fiscalCode || null,
+        verificationCode: fiscal?.verificationCode || null, reconciliationStatus: fiscal?.reconciliationStatus || null,
+        lastError: fiscal?.lastError || null, attempts: fiscal?.attempts || 0,
+        nextAttemptAt: fiscal?.nextAttemptAt?.toISOString?.() || null,
+      };
+    });
+    const saleIds = new Set(sales.map((sale: any) => sale.id));
+    const fiscalQueue = fiscalizations.filter((fiscal: any) => !saleIds.has(fiscal.transactionId)).map((fiscal: any) => {
+      const payload = (fiscal.requestPayload || {}) as any;
+      const grossAmount = Number(payload.grandTotal ?? payload.total ?? 0);
+      const taxAmount = Number(payload.taxTotal ?? payload.taxAmount ?? 0);
+      const netAmount = Math.max(0, grossAmount - taxAmount);
+      return {
+        id: fiscal.id, tenantId: fiscal.tenantId, branchId: fiscal.branchId,
+        receiptRef: String(payload.receiptNumber || fiscal.transactionId), transactionId: fiscal.transactionId,
+        date: fiscal.createdAt.toISOString(), netAmount, taxAmount, grossAmount,
+        taxRate: netAmount > 0 && taxAmount > 0 ? Number(((taxAmount / netAmount) * 100).toFixed(4)) : 0,
+        fiscalState: fiscal.state, fiscalReceiptNumber: fiscal.fiscalReceiptNumber || null,
+        fiscalCode: fiscal.fiscalCode || null, verificationCode: fiscal.verificationCode || null,
+        reconciliationStatus: fiscal.reconciliationStatus || null, lastError: fiscal.lastError || null,
+        attempts: fiscal.attempts || 0, nextAttemptAt: fiscal.nextAttemptAt?.toISOString?.() || null,
+      };
+    });
+    const totals = rows.reduce((a, r) => ({
+      netAmount: a.netAmount + r.netAmount, taxAmount: a.taxAmount + r.taxAmount,
+      grossAmount: a.grossAmount + r.grossAmount, transactionCount: a.transactionCount + 1,
+    }), { netAmount: 0, taxAmount: 0, grossAmount: 0, transactionCount: 0 });
+    const fiscalStateCounts = fiscalizations.reduce((a: Record<string, number>, r: any) => { a[r.state] = (a[r.state] || 0) + 1; return a; }, {});
+    const reconciliationCounts = fiscalizations.reduce((a: Record<string, number>, r: any) => { const s = r.reconciliationStatus || "PENDING"; a[s] = (a[s] || 0) + 1; return a; }, {});
+    const config = configRows.map((row: any) => ({
+      branchId: row.branchId, vatEnabled: Boolean(row.value?.vatEnabled), taxId: row.value?.taxId || null,
+      taxCode: row.value?.taxCode || "VAT", taxRatePercent: Number(row.value?.vatRatePercent ?? 0),
+      taxInclusivePricing: row.value?.taxInclusivePricing !== false, currencyCode: row.value?.currencyCode || "TZS",
+    }));
+    return { success: true, data: { from: start.toISOString(), to: end.toISOString(), rows, fiscalQueue, totals, fiscalStateCounts, reconciliationCounts, config } };
+  });
+
   // ==========================================
   // PHASE 2: Finance & Operational Control REST Routes
   // ==========================================
@@ -3201,12 +3317,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/accounts", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateAccountRequestSchema.parse(req.body);
     const account = await financeRepository.createAccount(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: account });
   });
 
   server.put("/api/v1/finance/accounts/:id", async (req) => {
+    assertFinanceAuthority(req, "admin");
     const validated = UpdateAccountRequestSchema.parse(req.body);
     const updated = await financeRepository.updateAccount(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
@@ -3219,17 +3337,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/periods", async (req, reply) => {
+    assertFinanceAuthority(req, "admin");
     const validated = CreateAccountingPeriodRequestSchema.parse(req.body);
     const period = await financeRepository.createAccountingPeriod(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: period });
   });
 
   server.post("/api/v1/finance/periods/:id/close", async (req) => {
+    assertFinanceAuthority(req, "close");
     const closed = await financeRepository.closePeriod(req.tenantContext!, (req.params as any).id);
     return { success: true, data: closed };
   });
 
   server.post("/api/v1/finance/periods/:id/reopen", async (req) => {
+    assertFinanceAuthority(req, "close");
     const reopened = await financeRepository.reopenPeriod(req.tenantContext!, (req.params as any).id);
     return { success: true, data: reopened };
   });
@@ -3241,6 +3362,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/journals", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateJournalEntryRequestSchema.parse(req.body);
     const result = await financeRepository.createJournalEntry(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
@@ -3255,6 +3377,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/journals/:id/reverse", async (req, reply) => {
+    assertFinanceAuthority(req, "reverse");
     const validated = ReverseJournalEntryRequestSchema.parse(req.body);
     const result = await financeRepository.reverseJournalEntry(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: result });
@@ -3267,47 +3390,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/receivables/invoices", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateCustomerInvoiceRequestSchema.parse(req.body);
     const invoice = await financeRepository.createCustomerInvoice(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: invoice });
   });
 
   server.get("/api/v1/finance/receivables/aging", async (req) => {
-    const query = (req.query as any) || {};
-    const asOfDate = query.asOfDate ? new Date(query.asOfDate) : new Date();
-    if (!Number.isFinite(asOfDate.getTime())) throw new Error("FINANCE_INVALID_AR_AS_OF_DATE");
-    const report = await financeRepository.getReceivablesAging(req.tenantContext!, asOfDate);
+    const report = await financeRepository.getReceivablesAging(req.tenantContext!);
     return { success: true, data: report };
-  });
-
-  server.get("/api/v1/finance/receivables/statements/:customerId", async (req) => {
-    const query = (req.query as any) || {};
-    const statement = await financeRepository.getCustomerStatement(
-      req.tenantContext!,
-      (req.params as any).customerId,
-      query.from,
-      query.to,
-    );
-    return { success: true, data: statement };
-  });
-
-  server.get("/api/v1/finance/receivables/ledger", async (req) => {
-    const query = (req.query as any) || {};
-    const ledger = await financeRepository.getReceivablesLedger(req.tenantContext!, query.customerId);
-    return { success: true, data: ledger };
-  });
-
-  server.get("/api/v1/finance/receivables/collections", async (req) => {
-    const query = (req.query as any) || {};
-    const asOfDate = query.asOfDate ? new Date(query.asOfDate) : new Date();
-    if (!Number.isFinite(asOfDate.getTime())) throw new Error("FINANCE_INVALID_COLLECTIONS_AS_OF_DATE");
-    const collections = await financeRepository.getReceivablesCollections(req.tenantContext!, asOfDate);
-    return { success: true, data: collections };
-  });
-
-  server.post("/api/v1/finance/receivables/collections/actions", async (req) => {
-    const action = await financeRepository.recordCollectionAction(req.tenantContext!, (req.body as any) || {});
-    return { success: true, data: action };
   });
 
   // Accounts Payable (Supplier Invoices & Aging)
@@ -3317,52 +3408,35 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/payables/invoices", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateSupplierInvoiceRequestSchema.parse(req.body);
     const invoice = await financeRepository.createSupplierInvoice(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: invoice });
   });
 
   server.get("/api/v1/finance/payables/aging", async (req) => {
-    const query = (req.query as any) || {};
-    const asOfDate = query.asOfDate ? new Date(query.asOfDate) : new Date();
-    if (!Number.isFinite(asOfDate.getTime())) throw new Error("FINANCE_INVALID_AP_AS_OF_DATE");
-    const report = await financeRepository.getPayablesAging(req.tenantContext!, asOfDate);
+    const report = await financeRepository.getPayablesAging(req.tenantContext!);
     return { success: true, data: report };
-  });
-
-  server.get("/api/v1/finance/payables/statements/:supplierId", async (req) => {
-    const query = (req.query as any) || {};
-    const statement = await financeRepository.getSupplierStatement(
-      req.tenantContext!,
-      (req.params as any).supplierId,
-      query.from,
-      query.to,
-    );
-    return { success: true, data: statement };
-  });
-
-  server.get("/api/v1/finance/payables/ledger", async (req) => {
-    const query = (req.query as any) || {};
-    const ledger = await financeRepository.getPayablesLedger(req.tenantContext!, query.supplierId);
-    return { success: true, data: ledger };
-  });
-
-  server.get("/api/v1/finance/payables/reports", async (req) => {
-    const query = (req.query as any) || {};
-    const asOfDate = query.asOfDate ? new Date(query.asOfDate) : new Date();
-    if (!Number.isFinite(asOfDate.getTime())) throw new Error("FINANCE_INVALID_AP_AS_OF_DATE");
-    const [aging, ledger] = await Promise.all([
-      financeRepository.getPayablesAging(req.tenantContext!, asOfDate),
-      financeRepository.getPayablesLedger(req.tenantContext!, query.supplierId),
-    ]);
-    return { success: true, data: { aging, ledger } };
   });
 
   // Payment Allocation
   server.post("/api/v1/finance/payments/allocate", async (req) => {
+    assertFinanceAuthority(req, "create");
     const validated = AllocatePaymentRequestSchema.parse(req.body);
     const result = await financeRepository.allocatePayment(req.tenantContext!, validated);
     return { success: true, data: result };
+  });
+
+  // Tax configuration
+  server.get("/api/v1/finance/taxes", async (req) => {
+    assertFinanceAuthority(req, "view");
+    return { success: true, data: await financeRepository.getTaxes(req.tenantContext!) };
+  });
+  server.post("/api/v1/finance/taxes", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
+    const validated = CreateTaxRequestSchema.parse(req.body);
+    const tax = await financeRepository.createTax(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: tax });
   });
 
   // Bank Accounts & Transactions
@@ -3372,12 +3446,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/banks", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateBankAccountRequestSchema.parse(req.body);
     const bank = await financeRepository.createBankAccount(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: bank });
   });
 
   server.post("/api/v1/finance/banks/:id/transactions", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateBankTransactionRequestSchema.parse(req.body);
     const tx = await financeRepository.recordBankTransaction(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: tx });
@@ -3402,26 +3478,43 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Financial Reports
   server.get("/api/v1/finance/reports/trial-balance", async (req) => {
+    assertFinanceAuthority(req, "view");
     const asOfDate = (req.query as any)?.asOfDate;
     const report = await financeRepository.getTrialBalance(req.tenantContext!, asOfDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/reports/profit-loss", async (req) => {
+    assertFinanceAuthority(req, "view");
     const { startDate, endDate } = (req.query as any) || {};
     const report = await financeRepository.getProfitAndLoss(req.tenantContext!, startDate, endDate);
     return { success: true, data: report };
   });
 
+  server.get("/api/v1/finance/reports/cash-flow", async (req) => {
+    assertFinanceAuthority(req, "view");
+    const { startDate, endDate } = (req.query as any) || {};
+    const report = await financeRepository.getCashFlow(req.tenantContext!, startDate, endDate);
+    return { success: true, data: report };
+  });
+
   server.get("/api/v1/finance/reports/balance-sheet", async (req) => {
+    assertFinanceAuthority(req, "view");
     const asOfDate = (req.query as any)?.asOfDate;
     const report = await financeRepository.getBalanceSheet(req.tenantContext!, asOfDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/dashboard/executive", async (req) => {
+    assertFinanceAuthority(req, "view");
     const dashboard = await financeRepository.getExecutiveDashboard(req.tenantContext!);
     return { success: true, data: dashboard };
+  });
+
+  server.get("/api/v1/finance/audit-trail", async (req) => {
+    assertFinanceAuthority(req, "view");
+    const events = await financeRepository.getFinancialAuditTrail(req.tenantContext!);
+    return { success: true, data: events };
   });
 
   server.get("/api/v1/finance/anomalies", async (req) => {
@@ -3436,25 +3529,25 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Departments
   server.get("/api/v1/workforce/departments", async (req) => {
-    const departments = await workforceRepository.getDepartments(req.tenantContext!);
+    const departments = await workforceRepository.getDepartments(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: departments };
   });
 
   server.post("/api/v1/workforce/departments", async (req, reply) => {
     const validated = CreateDepartmentRequestSchema.parse(req.body);
-    const department = await workforceRepository.createDepartment(req.tenantContext!, validated);
+    const department = await workforceRepository.createDepartment(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: department });
   });
 
   // Job Positions
   server.get("/api/v1/workforce/positions", async (req) => {
-    const positions = await workforceRepository.getJobPositions(req.tenantContext!);
+    const positions = await workforceRepository.getJobPositions(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: positions };
   });
 
   server.post("/api/v1/workforce/positions", async (req, reply) => {
     const validated = CreateJobPositionRequestSchema.parse(req.body);
-    const position = await workforceRepository.createJobPosition(req.tenantContext!, validated);
+    const position = await workforceRepository.createJobPosition(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: position });
   });
 
@@ -3502,59 +3595,59 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Shift Templates & Schedules
   server.get("/api/v1/workforce/shifts/templates", async (req) => {
-    const templates = await workforceRepository.getShiftTemplates(req.tenantContext!);
+    const templates = await workforceRepository.getShiftTemplates(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: templates };
   });
 
   server.post("/api/v1/workforce/shifts/templates", async (req, reply) => {
     const validated = CreateShiftTemplateRequestSchema.parse(req.body);
-    const template = await workforceRepository.createShiftTemplate(req.tenantContext!, validated);
+    const template = await workforceRepository.createShiftTemplate(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: template });
   });
 
   server.get("/api/v1/workforce/schedules", async (req) => {
-    const schedules = await workforceRepository.getSchedules(req.tenantContext!);
+    const schedules = await workforceRepository.getSchedules(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: schedules };
   });
 
   server.post("/api/v1/workforce/schedules", async (req, reply) => {
     const validated = CreateWorkforceScheduleRequestSchema.parse(req.body);
-    const schedule = await workforceRepository.createSchedule(req.tenantContext!, validated);
+    const schedule = await workforceRepository.createSchedule(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: schedule });
   });
 
   // Attendance & Time Tracking
   server.get("/api/v1/workforce/attendance", async (req) => {
-    const records = await workforceRepository.getAttendanceRecords(req.tenantContext!);
+    const records = await workforceRepository.getAttendanceRecords(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: records };
   });
 
   server.post("/api/v1/workforce/attendance/clock-in", async (req, reply) => {
     const validated = ClockInRequestSchema.parse(req.body);
-    const record = await workforceRepository.clockIn(req.tenantContext!, validated);
+    const record = await workforceRepository.clockIn(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: record });
   });
 
   server.post("/api/v1/workforce/attendance/:id/clock-out", async (req) => {
     const validated = ClockOutRequestSchema.parse(req.body);
-    const record = await workforceRepository.clockOut(req.tenantContext!, (req.params as any).id, validated);
+    const record = await workforceRepository.clockOut(requireWorkforcePermission(req, "WORKFORCE_EDIT"), (req.params as any).id, validated);
     return { success: true, data: record };
   });
 
   // Timesheets
   server.get("/api/v1/workforce/timesheets", async (req) => {
-    const timesheets = await workforceRepository.getTimesheets(req.tenantContext!);
+    const timesheets = await workforceRepository.getTimesheets(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: timesheets };
   });
 
   server.post("/api/v1/workforce/timesheets", async (req, reply) => {
     const validated = CreateTimesheetRequestSchema.parse(req.body);
-    const timesheet = await workforceRepository.generateTimesheet(req.tenantContext!, validated);
+    const timesheet = await workforceRepository.generateTimesheet(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: timesheet });
   });
 
   server.post("/api/v1/workforce/timesheets/:id/approve", async (req) => {
-    const approved = await workforceRepository.approveTimesheet(req.tenantContext!, (req.params as any).id);
+    const approved = await workforceRepository.approveTimesheet(requireWorkforcePermission(req, "WORKFORCE_EDIT"), (req.params as any).id);
     return { success: true, data: approved };
   });
 
@@ -3661,47 +3754,47 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Commissions
   server.get("/api/v1/workforce/commissions", async (req) => {
-    const commissions = await workforceRepository.getCommissions(req.tenantContext!);
+    const commissions = await workforceRepository.getCommissions(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: commissions };
   });
 
   server.post("/api/v1/workforce/commissions", async (req, reply) => {
     const validated = CreateCommissionRecordRequestSchema.parse(req.body);
-    const record = await workforceRepository.recordCommission(req.tenantContext!, validated);
+    const record = await workforceRepository.recordCommission(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: record });
   });
 
   server.post("/api/v1/workforce/commissions/:id/approve", async (req) => {
-    const approved = await workforceRepository.approveCommission(req.tenantContext!, (req.params as any).id);
+    const approved = await workforceRepository.approveCommission(requireWorkforcePermission(req, "WORKFORCE_EDIT"), (req.params as any).id);
     return { success: true, data: approved };
   });
 
   // Payroll Inputs
   server.get("/api/v1/workforce/payroll-inputs", async (req) => {
-    const inputs = await workforceRepository.getPayrollInputs(req.tenantContext!);
+    const inputs = await workforceRepository.getPayrollInputs(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: inputs };
   });
 
   server.post("/api/v1/workforce/payroll-inputs/from-timesheet", async (req, reply) => {
     const { employeeId, timesheetId } = (req.body as any) || {};
-    const input = await workforceRepository.generatePayrollInputFromTimesheet(req.tenantContext!, employeeId, timesheetId);
+    const input = await workforceRepository.generatePayrollInputFromTimesheet(requireWorkforcePermission(req, "WORKFORCE_EDIT"), employeeId, timesheetId);
     return reply.status(201).send({ success: true, data: input });
   });
 
   server.post("/api/v1/workforce/payroll-inputs/:id/approve", async (req) => {
-    const approved = await workforceRepository.approvePayrollInput(req.tenantContext!, (req.params as any).id);
+    const approved = await workforceRepository.approvePayrollInput(requireWorkforcePermission(req, "WORKFORCE_EDIT"), (req.params as any).id);
     return { success: true, data: approved };
   });
 
   // Workforce Dashboard & Analytics
   server.get("/api/v1/workforce/dashboard", async (req) => {
-    const dashboard = await workforceRepository.getDashboardSummary(req.tenantContext!);
+    const dashboard = await workforceRepository.getDashboardSummary(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: dashboard };
   });
 
   server.get("/api/v1/workforce/analytics", async (req) => {
     const period = (req.query as any)?.period || "2026-08";
-    const report = await workforceRepository.getAnalyticsReport(req.tenantContext!, period);
+    const report = await workforceRepository.getAnalyticsReport(requireWorkforcePermission(req, "WORKFORCE_VIEW"), period);
     return { success: true, data: report };
   });
 
@@ -4894,16 +4987,132 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.send({ success: true, data: result[0] });
   });
 
-  server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
-    const { globalRetailService } = await import("./services/retailService.js");
-    const ctx = requireTenantContext(req);
-    const body = (req.body as any) || {};
-    const sale = await globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
-    return reply.status(201).send({
-      success: true,
-      data: sale,
-    });
+    // Authoritative pricing configuration. All mutations are tenant+branch scoped and audited.
+  server.get("/api/v1/pricing/price-lists", async (req) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const rows = await prisma.priceList.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }] });
+    return { success: true, data: rows };
   });
+
+  server.post("/api/v1/pricing/price-lists", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const body = z.object({ name: z.string().trim().min(1).max(120), code: z.string().trim().min(1).max(64), currency: z.string().trim().min(3).max(12).default("TZS"), isDefault: z.boolean().optional() }).parse(req.body || {});
+    const row = await prisma.$transaction(async (tx: any) => {
+      if (body.isDefault) await tx.priceList.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { isDefault: false } });
+      const created = await tx.priceList.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, name: body.name, code: body.code, currency: body.currency, isDefault: Boolean(body.isDefault) } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "PRICE_LIST_CREATED", entityType: "PriceList", entityId: created.id, metadata: { name: created.name, code: created.code, currency: created.currency, isDefault: created.isDefault } } });
+      return created;
+    });
+    return reply.status(201).send({ success: true, data: row });
+  });
+
+  server.post("/api/v1/pricing/price-lists/:priceListId/items", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const body = z.object({ variantId: z.string().uuid(), unitPrice: z.number().nonnegative(), currency: z.string().trim().min(3).max(12).default("TZS"), priority: z.number().int().default(0), effectiveFrom: z.string().datetime().optional(), effectiveTo: z.string().datetime().optional(), isActive: z.boolean().optional() }).parse(req.body || {});
+    const priceListId = String((req.params as any).priceListId);
+    const row = await prisma.$transaction(async (tx: any) => {
+      const list = await tx.priceList.findFirst({ where: { id: priceListId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!list) throw new Error("PRICE_LIST_NOT_FOUND");
+      const variant = await tx.productVariant.findFirst({ where: { id: body.variantId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } });
+      if (!variant) throw new Error("PRICING_VARIANT_NOT_FOUND");
+      const effectiveFrom = body.effectiveFrom ? new Date(body.effectiveFrom) : new Date();
+      const effectiveTo = body.effectiveTo ? new Date(body.effectiveTo) : null;
+      if (effectiveTo && effectiveTo <= effectiveFrom) throw new Error("PRICING_EFFECTIVE_TO_INVALID");
+      const created = await tx.priceListItem.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, priceListId, productId: variant.productId, variantId: variant.id, unitPrice: body.unitPrice, currency: body.currency, priority: body.priority, isActive: body.isActive !== false, effectiveFrom, effectiveTo } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "PRICE_LIST_ITEM_CREATED", entityType: "PriceListItem", entityId: created.id, metadata: { priceListId, variantId: variant.id, unitPrice: body.unitPrice, effectiveFrom, effectiveTo, priority: body.priority } } });
+      return created;
+    });
+    return reply.status(201).send({ success: true, data: row });
+  });
+
+  server.get("/api/v1/pricing/customer-prices", async (req) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const customerId = String((req.query as any)?.customerId || "");
+    const rows = await prisma.customerPrice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, ...(customerId ? { customerId } : {}) }, orderBy: [{ priority: "desc" }, { effectiveFrom: "desc" }] });
+    return { success: true, data: rows };
+  });
+
+  server.post("/api/v1/pricing/customer-prices", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const body = z.object({ customerId: z.string().uuid(), variantId: z.string().uuid(), unitPrice: z.number().nonnegative(), currency: z.string().trim().min(3).max(12).default("TZS"), priority: z.number().int().default(0), effectiveFrom: z.string().datetime().optional(), effectiveTo: z.string().datetime().optional(), isActive: z.boolean().optional() }).parse(req.body || {});
+    const row = await prisma.$transaction(async (tx: any) => {
+      const customer = await tx.customer.findFirst({ where: { id: body.customerId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
+      const variant = await tx.productVariant.findFirst({ where: { id: body.variantId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } });
+      if (!customer) throw new Error("PRICING_CUSTOMER_NOT_FOUND");
+      if (!variant) throw new Error("PRICING_VARIANT_NOT_FOUND");
+      const effectiveFrom = body.effectiveFrom ? new Date(body.effectiveFrom) : new Date();
+      const effectiveTo = body.effectiveTo ? new Date(body.effectiveTo) : null;
+      if (effectiveTo && effectiveTo <= effectiveFrom) throw new Error("PRICING_EFFECTIVE_TO_INVALID");
+      const created = await tx.customerPrice.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, customerId: customer.id, variantId: variant.id, unitPrice: body.unitPrice, currency: body.currency, priority: body.priority, effectiveFrom, effectiveTo, isActive: body.isActive !== false } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_PRICE_CREATED", entityType: "CustomerPrice", entityId: created.id, metadata: { customerId: customer.id, variantId: variant.id, unitPrice: body.unitPrice, effectiveFrom, effectiveTo, priority: body.priority } } });
+      return created;
+    });
+    return reply.status(201).send({ success: true, data: row });
+  });
+
+  server.get("/api/v1/pricing/tiers", async (req) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const rows = await prisma.pricingTier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ kind: "asc" }, { minQuantity: "desc" }, { priority: "desc" }] });
+    return { success: true, data: rows };
+  });
+
+  server.post("/api/v1/pricing/tiers", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const body = z.object({ variantId: z.string().uuid(), kind: z.enum(["BULK","WHOLESALE"]), customerSegment: z.string().trim().min(1).max(64).optional(), minQuantity: z.number().positive(), maxQuantity: z.number().positive().optional(), unitPrice: z.number().nonnegative(), currency: z.string().trim().min(3).max(12).default("TZS"), priority: z.number().int().default(0), effectiveFrom: z.string().datetime().optional(), effectiveTo: z.string().datetime().optional(), isActive: z.boolean().optional() }).parse(req.body || {});
+    if (body.maxQuantity !== undefined && body.maxQuantity < body.minQuantity) throw new Error("PRICING_MAX_QUANTITY_INVALID");
+    const row = await prisma.$transaction(async (tx: any) => {
+      const variant = await tx.productVariant.findFirst({ where: { id: body.variantId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } });
+      if (!variant) throw new Error("PRICING_VARIANT_NOT_FOUND");
+      const effectiveFrom = body.effectiveFrom ? new Date(body.effectiveFrom) : new Date();
+      const effectiveTo = body.effectiveTo ? new Date(body.effectiveTo) : null;
+      if (effectiveTo && effectiveTo <= effectiveFrom) throw new Error("PRICING_EFFECTIVE_TO_INVALID");
+      const created = await tx.pricingTier.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: variant.id, kind: body.kind, customerSegment: body.customerSegment || null, minQuantity: body.minQuantity, maxQuantity: body.maxQuantity ?? null, unitPrice: body.unitPrice, currency: body.currency, priority: body.priority, effectiveFrom, effectiveTo, isActive: body.isActive !== false } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "PRICING_TIER_CREATED", entityType: "PricingTier", entityId: created.id, metadata: { variantId: variant.id, kind: body.kind, customerSegment: body.customerSegment || null, minQuantity: body.minQuantity, maxQuantity: body.maxQuantity ?? null, unitPrice: body.unitPrice } } });
+      return created;
+    });
+    return reply.status(201).send({ success: true, data: row });
+  });
+
+  server.get("/api/v1/pricing/promotions", async (req) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const rows = await prisma.pricingPromotion.findMany({ where: { tenantId: ctx.tenantId, OR: [{ branchId: null }, { branchId: ctx.branchId }] }, orderBy: [{ isActive: "desc" }, { priority: "desc" }, { startAt: "desc" }] });
+    return { success: true, data: rows };
+  });
+
+  server.post("/api/v1/pricing/promotions", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const body = z.object({ branchId: z.string().uuid().nullable().optional(), variantId: z.string().uuid().nullable().optional(), name: z.string().trim().min(1).max(160), kind: z.enum(["PERCENTAGE","FIXED"]), value: z.number().nonnegative(), minQuantity: z.number().positive().optional(), minOrderAmount: z.number().nonnegative().optional(), startAt: z.string().datetime(), endAt: z.string().datetime(), priority: z.number().int().default(0), stackable: z.boolean().default(false), isActive: z.boolean().default(true) }).parse(req.body || {});
+    if (body.kind === "PERCENTAGE" && body.value > 100) throw new Error("PROMOTION_PERCENT_EXCEEDS_100");
+    if (new Date(body.endAt) <= new Date(body.startAt)) throw new Error("PROMOTION_END_BEFORE_START");
+    if (body.branchId && body.branchId !== ctx.branchId) throw new Error("PROMOTION_BRANCH_BOUNDARY_VIOLATION");
+    const row = await prisma.$transaction(async (tx: any) => {
+      if (body.variantId) {
+        const variant = await tx.productVariant.findFirst({ where: { id: body.variantId, tenantId: ctx.tenantId, branchId: body.branchId || ctx.branchId, isActive: true } });
+        if (!variant) throw new Error("PRICING_VARIANT_NOT_FOUND");
+      }
+      const created = await tx.pricingPromotion.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: body.branchId || ctx.branchId, variantId: body.variantId || null, name: body.name, kind: body.kind, value: body.value, minQuantity: body.minQuantity ?? null, minOrderAmount: body.minOrderAmount ?? null, startAt: new Date(body.startAt), endAt: new Date(body.endAt), priority: body.priority, stackable: body.stackable, isActive: body.isActive, requiredPermission: "DISCOUNT_MANAGE", createdById: ctx.userId } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "PROMOTION_CREATED", entityType: "PricingPromotion", entityId: created.id, metadata: { name: created.name, kind: created.kind, value: Number(created.value), variantId: created.variantId, startAt: created.startAt, endAt: created.endAt, stackable: created.stackable } } });
+      return created;
+    });
+    return reply.status(201).send({ success: true, data: row });
+  });
+
+server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "create");
+    const validated = CreatePosSaleRequestSchema.parse(req.body);
+    const discountRequested = Number(validated.discountTotal || 0) > 0 || validated.items.some((x: any) => Number(x.discountAmount || 0) > 0);
+    if (discountRequested) {
+      const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
+      const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+      const allowed = permissions.includes("*") || permissions.includes("discount.manage") || permissions.includes("sales.discount") ||
+        roles.some((r: string) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN","MANAGER","BRANCH_MANAGER"].includes(r));
+      if (!allowed) throw new Error("DISCOUNT_MANAGE_REQUIRED");
+    }
+    const result = atomicCommercialFinance
+      ? await atomicCommercialFinance.createSale(ctx, validated)
+      : await commercialRepository.createPosSale(ctx, validated);
+    return reply.status(201).send({ success: true, data: result });
+  });;
 
   server.get("/api/v1/retail/replenishment", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
@@ -5498,36 +5707,64 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Phase 21 — AI-Native Business Operations Endpoints
   server.post("/api/v1/ai-native/recommendations", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    const body = (req.body as any) || {};
-    const rec = globalAiNativeService.requestRecommendation({
-      tenantId: resolveTenantId(req, body.tenantId),
-      branchId: body.branchId || "BRANCH-01",
-      domain: body.domain || "INVENTORY",
-      proposedAction: body.proposedAction || "Reorder 500 units of SKU-101",
-      riskLevel: body.riskLevel || "LEVEL_2_CONTROLLED_OPERATIONAL",
-      confidenceScore: body.confidenceScore || 0.92,
-      evidenceSummary: body.evidenceSummary || "Historical sales + seasonal demand spike",
-    });
-    return reply.status(201).send({ success: true, data: rec });
+    try {
+      const ctx = requireCommercialPermission(req, "inventory.manage");
+      const body = z.object({
+        domain: z.enum(["SALES", "INVENTORY", "FINANCE", "WORKFORCE", "OPERATIONS", "CUSTOMER_SERVICE", "ENGINEERING", "SAAS_REVENUE", "MARKETPLACE"]),
+        proposedAction: z.string().trim().min(1).max(2000),
+        riskLevel: z.enum(["LEVEL_0_INFORMATIONAL", "LEVEL_1_LOW_IMPACT", "LEVEL_2_CONTROLLED_OPERATIONAL", "LEVEL_3_HIGH_IMPACT", "LEVEL_4_RESTRICTED"]),
+        confidenceScore: z.number().finite().min(0).max(1),
+        evidenceSummary: z.string().trim().min(1).max(5000),
+      }).strict().parse(req.body);
+      const rec = globalAiNativeService.requestRecommendation({
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        ...body,
+      });
+      return reply.status(201).send({ success: true, data: rec });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "AI_NATIVE_RECOMMENDATION_REJECTED", message: error instanceof Error ? error.message : "Recommendation rejected" } });
+    }
   });
 
   server.post("/api/v1/ai-native/policy/validate", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    const { recommendationId, maxLimitUsd, proposedLimitUsd } = req.body as any;
-    const res = globalAiNativeService.validatePolicy(recommendationId, { maxLimitUsd: maxLimitUsd || 5000, proposedLimitUsd: proposedLimitUsd || 1200 });
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "inventory.manage");
+      const body = z.object({
+        recommendationId: z.string().trim().min(1).max(128),
+        maxLimitUsd: z.number().finite().nonnegative(),
+        proposedLimitUsd: z.number().finite().nonnegative(),
+      }).strict().parse(req.body);
+      const res = globalAiNativeService.validatePolicy(body.recommendationId, { maxLimitUsd: body.maxLimitUsd, proposedLimitUsd: body.proposedLimitUsd }, ctx.tenantId);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "AI_NATIVE_POLICY_REJECTED", message: error instanceof Error ? error.message : "AI policy validation rejected" } });
+    }
   });
 
   server.post("/api/v1/ai-native/kill-switch", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    const { scope, targetId } = req.body as any;
-    const status = globalAiNativeService.triggerKillSwitch(scope || "AGENT", targetId || "INVENTORY_AGENT");
-    return reply.status(200).send({ success: true, data: status });
+    try {
+      const actor = requireSuperAdminContext(req);
+      requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const body = z.object({
+        scope: z.enum(["GLOBAL", "TENANT", "AGENT", "TOOL"]),
+        targetId: z.string().trim().min(1).max(128),
+      }).strict().parse(req.body);
+      const status = globalAiNativeService.triggerKillSwitch(body.scope, body.targetId);
+      return reply.status(200).send({ success: true, data: status });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI-native kill switch rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 401).send({ success: false, error: { code: "AI_NATIVE_KILL_SWITCH_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/ai-native/ledger", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    return reply.status(200).send({ success: true, data: globalAiNativeService.getLedger() });
+    requireAdminContext(req);
+    const ctx = requireAdminContext(req);
+    return reply.status(200).send({ success: true, data: globalAiNativeService.getLedger(ctx.tenantId) });
   });
 
   server.get("/api/v1/ai-native/dashboard", async (req, reply) => {
@@ -5538,15 +5775,23 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Phase 22 — Autonomous Operations (KAOF) Endpoints
   server.post("/api/v1/autonomous-operations/detect-remediate", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const body = (req.body as any) || {};
-    const res = globalAutonomousOperationsService.executeAutonomousRequest({
-      requestId: `REQ-REM-${Date.now()}`,
-      tenantId: resolveTenantId(req, body.tenantId),
-      agentId: body.targetService || "CloudRunWorkerPool",
-      capability: body.proposedRemediation || "Restart Worker Instance & Reopen Connection Pool",
-      financialCostTzs: 0,
-    });
-    return reply.status(201).send({ success: true, data: res });
+    try {
+      const ctx = requireAdminContext(req);
+      const body = z.object({
+        targetService: z.string().trim().min(1).max(200),
+        proposedRemediation: z.string().trim().min(1).max(2000),
+      }).strict().parse(req.body);
+      const res = globalAutonomousOperationsService.executeAutonomousRequest({
+        requestId: `REQ-REM-${Date.now()}`,
+        tenantId: ctx.tenantId,
+        agentId: body.targetService,
+        capability: body.proposedRemediation,
+        financialCostTzs: 0,
+      });
+      return reply.status(201).send({ success: true, data: res });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "AUTONOMOUS_REMEDIATION_REJECTED", message: error instanceof Error ? error.message : "Autonomous remediation rejected" } });
+    }
   });
 
   server.post("/api/v1/autonomous-operations/simulation/dry-run", async (req, reply) => {
@@ -5565,21 +5810,29 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/autonomous-operations/kill-switch", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const { scope, targetId, tenantId } = req.body as any;
-    const status = globalAutonomousOperationsService.activateAgentKillSwitch(tenantId || "TENANT-AUTO-01", targetId || "CloudRunWorkerPool", "SYSTEM");
-    return reply.status(200).send({ success: true, data: status });
+    try {
+      const actor = requireSuperAdminContext(req);
+      requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const body = z.object({ targetId: z.string().trim().min(1).max(200), tenantId: z.string().trim().min(1).max(128).optional() }).strict().parse(req.body);
+      const tenantId = body.tenantId ? resolveTenantId(req, body.tenantId) : actor.tenantId;
+      const status = globalAutonomousOperationsService.activateAgentKillSwitch(tenantId, body.targetId, actor.userId);
+      return reply.status(200).send({ success: true, data: status });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Autonomous kill switch rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 401).send({ success: false, error: { code: "AUTONOMOUS_KILL_SWITCH_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/autonomous-operations/ledger", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const tenantId = (req.query as any)?.tenantId || "TENANT-AUTO-01";
-    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getEngine().getAuditTrail(tenantId) });
+    const ctx = requireAdminContext(req);
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getEngine().getAuditTrail(ctx.tenantId) });
   });
 
   server.get("/api/v1/autonomous-operations/dashboard", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const tenantId = (req.query as any)?.tenantId || "TENANT-AUTO-01";
-    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(tenantId) });
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(ctx.tenantId) });
   });
 
   // Phase 23 — KwakoPos Certification Program (KCA) Endpoints
@@ -5786,30 +6039,24 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Phase 25 — KwakoPos System UI & Experience Architecture Endpoints
   server.post("/api/v1/system-ui/navigation", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const body = (req.body as any) || {};
-    const permissions = body.permissions || ["pos.access", "inventory.read", "workforce.read"];
-    const nav = globalSystemUiService.generateNavigation(permissions);
+    const ctx = requireTenantContext(req);
+    const nav = globalSystemUiService.generateNavigation(ctx.permissions);
     return reply.status(200).send({ success: true, data: nav });
   });
 
   server.post("/api/v1/system-ui/search", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const body = (req.body as any) || {};
-    const res = globalSystemUiService.executeGlobalSearch(
-      body.query || "Cement",
-      resolveTenantId(req, body.tenantId),
-      body.branchId || "BR-DSM-01"
-    );
+    const ctx = requireTenantContext(req);
+    const body = z.object({ query: z.string().trim().min(1).max(300).default("Cement") }).strict().parse(req.body ?? {});
+    const res = globalSystemUiService.executeGlobalSearch(body.query, ctx.tenantId, ctx.branchId);
     return reply.status(200).send({ success: true, data: res });
   });
 
   server.post("/api/v1/system-ui/commands/execute", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const body = (req.body as any) || {};
-    const res = globalSystemUiService.executeCommand(
-      body.actionId || "CMD-CREATE-SALE",
-      body.permissions || ["pos.access"]
-    );
+    const ctx = requireTenantContext(req);
+    const body = z.object({ actionId: z.string().trim().min(1).max(128) }).strict().parse(req.body);
+    const res = globalSystemUiService.executeCommand(body.actionId, ctx.permissions);
     if (!res.success) {
       return reply.status(403).send({ success: false, error: res.error });
     }
@@ -5818,13 +6065,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/system-ui/shell-state", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const tenantId = (req.query as any)?.tenantId || "TNT-TZ-001";
-    const branchId = (req.query as any)?.branchId || "BR-DSM-01";
-    return reply.status(200).send({ success: true, data: globalSystemUiService.getAppShellState(tenantId, branchId, true) });
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalSystemUiService.getAppShellState(ctx.tenantId, ctx.branchId, true) });
   });
 
   server.get("/api/v1/system-ui/dashboard", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
+    requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalSystemUiService.getDashboardMetrics() });
   });
 
@@ -5911,36 +6158,108 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Phase 29 — Super Admin & Platform UI Endpoints
   server.get("/api/v1/super-admin/overview", async (req, reply) => {
-    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    const adminId = (req.headers["x-admin-id"] as string) || "ADM-001";
-    const email = (req.headers["x-admin-email"] as string) || "admin@kwakopos.com";
-    const role = (req.headers["x-admin-role"] as string) || "PLATFORM_ADMIN";
-    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+    try {
+      const ctx = requireSuperAdminContext(req);
+      const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+      const adminId = String(ctx.userId);
+      const email = String((ctx as any).email || "");
+      const role = String(ctx.roles?.[0] || "SUPER_ADMIN");
+      return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Access denied";
+      const status = message.startsWith("UNAUTHORIZED") ? 401 : 403;
+      return reply.status(status).send({ success: false, error: { code: status === 401 ? "UNAUTHORIZED" : "FORBIDDEN", message: status === 401 ? "Authentication required." : "Access denied." } });
+    }
   });
 
   server.post("/api/v1/super-admin/context-switch", async (req, reply) => {
     const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    const body = (req.body as any) || {};
-    const adminId = body.adminId || "ADM-001";
-    const tenantId = resolveTenantId(req, body.tenantId);
-    const reason = body.reason || "Audited customer support ticket investigation";
-    const ctx = globalSuperAdminPlatformService.initiateContextSwitch(adminId, tenantId, reason, body.timeLimitMinutes);
-    return reply.status(200).send({ success: true, data: ctx });
+    try {
+      const actor = requireSuperAdminContext(req);
+      requireStepUpToken(req, actor, "CONTEXT_SWITCH");
+      const body = (req.body as any) || {};
+      const tenantId = String(body.tenantId || "").trim();
+      const reason = String(body.reason || "").trim();
+      const timeLimitMinutes = Number(body.timeLimitMinutes ?? 30);
+      if (!tenantId || reason.length < 3 || !Number.isInteger(timeLimitMinutes) || timeLimitMinutes < 1 || timeLimitMinutes > 60) {
+        return reply.status(400).send({ success: false, error: { code: "CONTEXT_SWITCH_INPUT_INVALID", message: "tenantId, reason and a 1–60 minute time limit are required." } });
+      }
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, status: true, createdAt: true } });
+      if (!tenant) return reply.status(404).send({ success: false, error: { code: "TENANT_NOT_FOUND", message: "Target tenant not found." } });
+      if (tenant.status === "CLOSED") return reply.status(409).send({ success: false, error: { code: "TENANT_CLOSED", message: "Closed tenants cannot be opened for support." } });
+      globalSuperAdminPlatformService.registerTenant?.({
+        tenantId: tenant.id,
+        name: tenant.name,
+        status: String(tenant.status) as any,
+        country: "TZ",
+        branchesCount: 0,
+        modulesCount: 0,
+        createdAt: tenant.createdAt.toISOString(),
+      });
+      const session = globalSuperAdminPlatformService.initiateContextSwitch(String(actor.userId), tenantId, reason, timeLimitMinutes);
+      await prisma.$executeRaw`INSERT INTO platform_audit_events (id,tenant_id,actor_id,action,entity_type,entity_id,metadata)
+        VALUES (${randomUUID()},${tenantId},${actor.userId},'SUPER_ADMIN_CONTEXT_SWITCH_STARTED','Tenant',${tenantId},${JSON.stringify({ switchId: session.switchId, reason, timeLimitMinutes })}::jsonb)`;
+      return reply.status(200).send({ success: true, source: "postgresql-audited", data: session });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Context switch denied";
+      const status = message.startsWith("FORBIDDEN") ? 403 : message.includes("STEP_UP") ? 401 : 400;
+      return reply.status(status).send({ success: false, error: { code: "SUPER_ADMIN_CONTEXT_SWITCH_FAILED", message } });
+    }
   });
 
   server.post("/api/v1/super-admin/emergency-kill-switch", async (req, reply) => {
     const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    const body = (req.body as any) || {};
-    const target = body.target || "GLOBAL_AI";
-    const reason = body.reason || "Emergency security container isolation";
-    const adminId = body.adminId || "ADM-SEC-01";
-    const ks = globalSuperAdminPlatformService.triggerEmergencyKillSwitch(target, reason, adminId);
-    return reply.status(200).send({ success: true, data: ks });
+    try {
+      const actor = requireSuperAdminContext(req);
+      requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const body = (req.body as any) || {};
+      const target = String(body.target || "GLOBAL_AI");
+      const reason = String(body.reason || "").trim();
+      const allowedTargets = new Set(["GLOBAL_AI", "RELEASE_ROLLBACK", "PLUGIN_FREEZE", "INTEGRATION_PAUSE", "TENANT_SUSPEND"]);
+      if (!allowedTargets.has(target) || reason.length < 3) {
+        return reply.status(400).send({ success: false, error: { code: "KILL_SWITCH_INPUT_INVALID", message: "A valid target and emergency reason are required." } });
+      }
+      const ks = globalSuperAdminPlatformService.triggerEmergencyKillSwitch(target as any, reason, String(actor.userId));
+      await prisma.$executeRaw`INSERT INTO platform_audit_events (id,tenant_id,actor_id,action,entity_type,entity_id,metadata)
+        VALUES (${randomUUID()},NULL,${actor.userId},'SUPER_ADMIN_EMERGENCY_KILL_SWITCH','PlatformEmergencyKillSwitch',${ks.actionId},${JSON.stringify({ target, reason, immutableAuditId: ks.immutableAuditId })}::jsonb)`;
+      return reply.status(200).send({ success: true, source: "postgresql-audited", data: ks });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Emergency action denied";
+      const status = message.startsWith("FORBIDDEN") ? 403 : message.includes("STEP_UP") ? 401 : 400;
+      return reply.status(status).send({ success: false, error: { code: "SUPER_ADMIN_EMERGENCY_ACTION_FAILED", message } });
+    }
   });
 
   server.get("/api/v1/super-admin/dashboard", async (req, reply) => {
-    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getDashboardMetrics() });
+    try {
+      const actor = requireSuperAdminContext(req);
+      const [totalTenants, activeTenants, totalBranches, totalUsers, subscriptionCount, incidentCount] = await Promise.all([
+        prisma.tenant.count(),
+        prisma.tenant.count({ where: { status: "ACTIVE" } }),
+        prisma.branch.count(),
+        prisma.user.count(),
+        prisma.saasDataRecord.count({ where: { entityType: "SUBSCRIPTION" } }),
+        prisma.securityPrivacyIncident.count({ where: { status: { notIn: ["CLOSED", "REMEDIATED"] } } }),
+      ]);
+      return reply.status(200).send({
+        success: true,
+        source: "postgresql",
+        data: {
+          platformName: "Kwakoko Business Operating System",
+          totalTenants,
+          activeTenants,
+          totalBranches,
+          totalUsers,
+          activeSubscriptions: subscriptionCount,
+          activeSecurityIncidents: incidentCount,
+          release: getReleaseIdentity(config),
+          actorId: actor.userId,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Platform dashboard unavailable";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 503).send({ success: false, error: { code: "SUPER_ADMIN_DASHBOARD_FAILED", message } });
+    }
   });
 
   // Super Admin SQL Studio & Live Database Explorer Endpoints
@@ -5996,9 +6315,17 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/workflow-automation/approval", async (req, reply) => {
     const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
-    const body = (req.body as any) || {};
-    const res = globalWorkflowAutomationService.decideApproval(body.taskId, body.decision, body.approverId || "USER-001");
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireAdminContext(req);
+      const body = z.object({
+        taskId: z.string().trim().min(1).max(128),
+        decision: z.enum(["APPROVED", "REJECTED"]),
+      }).strict().parse(req.body);
+      const res = globalWorkflowAutomationService.decideApproval(body.taskId, body.decision, ctx.userId, ctx.tenantId);
+      return reply.status(res ? 200 : 409).send({ success: res, data: res });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "WORKFLOW_APPROVAL_REJECTED", message: error instanceof Error ? error.message : "Workflow approval rejected" } });
+    }
   });
 
   server.get("/api/v1/workflow-automation/dashboard", async (req, reply) => {
@@ -6014,23 +6341,40 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/bi-analytics/define-metric", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
-    const body = (req.body as any) || {};
-    const res = globalBiAnalyticsService.defineMetric(body);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      requireAdminContext(req);
+      const metric = BiMetricDefinitionSchema.parse(req.body);
+      const res = globalBiAnalyticsService.defineMetric(metric);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Metric definition rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "BI_METRIC_REJECTED", message } });
+    }
   });
 
   server.post("/api/v1/bi-analytics/query", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
-    const body = (req.body as any) || {};
-    const res = globalBiAnalyticsService.querySemantic(body.queryText || "What was gross margin?", body.permissions || ["finance.read"]);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "finance.read");
+      const body = BiSemanticQuerySchema.parse(req.body);
+      const res = globalBiAnalyticsService.querySemantic(body.queryText, ctx.permissions);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unauthorized analytical query";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "BI_QUERY_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/bi-analytics/insights", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
-    const tenantId = (req.query as any)?.tenantId || "TEN-001";
-    const res = globalBiAnalyticsService.getInsightsAndForecasts(tenantId);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "finance.read");
+      const res = globalBiAnalyticsService.getInsightsAndForecasts(ctx.tenantId);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unauthorized analytical insights";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "BI_INSIGHTS_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/bi-analytics/dashboard", async (req, reply) => {
@@ -6046,30 +6390,53 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/ai-operating-layer/ask", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.askAi(body.queryText || "What is current margin?", body.permissions || ["finance.read"]);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "finance.read");
+      const body = AiAskSchema.parse(req.body);
+      const res = globalAiOperatingLayerService.askAi(body.queryText, ctx.permissions);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI query rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "AI_QUERY_REJECTED", message } });
+    }
   });
 
   server.post("/api/v1/ai-operating-layer/approve", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.executeAction(body.recommendationId, body.approverId || "USER-001");
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireAdminContext(req);
+      const body = AiApprovalSchema.parse(req.body);
+      const res = globalAiOperatingLayerService.executeAction(body.recommendationId, ctx.userId, ctx.tenantId);
+      return reply.status(res.success ? 200 : 409).send({ success: res.success, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI approval rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "AI_APPROVAL_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/ai-operating-layer/explain/:id", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const params = req.params as any;
-    const res = globalAiOperatingLayerService.explainRecommendation(params.id);
-    return reply.status(200).send({ success: true, data: res });
+    const ctx = requireTenantContext(req);
+    const params = req.params as { id: string };
+    const recommendationId = z.string().min(1).max(128).parse(params.id);
+    const res = globalAiOperatingLayerService.explainRecommendation(recommendationId, ctx.tenantId);
+    return reply.status(res.found ? 200 : 404).send({ success: res.found, data: res });
   });
 
   server.post("/api/v1/ai-operating-layer/kill-switch", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.toggleKillSwitch(body.scope || "GLOBAL", body.disabled ?? true);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireSuperAdminContext(req);
+      const body = AiKillSwitchSchema.parse(req.body);
+      requireStepUpToken(req, ctx, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const target = body.scope === "GLOBAL" ? body.disabled : (body.targetId || "");
+      if (body.scope !== "GLOBAL" && !body.targetId) throw new Error("AI_KILL_SWITCH_TARGET_REQUIRED");
+      const res = globalAiOperatingLayerService.toggleKillSwitch(body.scope as any, target);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI kill switch rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 401).send({ success: false, error: { code: "AI_KILL_SWITCH_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/ai-operating-layer/dashboard", async (req, reply) => {
@@ -6104,51 +6471,85 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // ─── Phase 34 — Enterprise Approvals REST API (/api/v1/approvals/*) ───
   server.get("/api/v1/approvals/policies", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
   });
 
   server.post("/api/v1/approvals/requests", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.submitRequest(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    try {
+      const ctx = requireTenantContext(req);
+      const body = ApprovalRequestSchema.parse(req.body) as any;
+      const result = globalEnterpriseApprovalsService.submitRequest({
+        ...body,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        requesterId: ctx.userId,
+        requesterRole: String(ctx.roles?.[0] || "USER"),
+      });
+      return reply.status(result.success ? 201 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_REQUEST_REJECTED", message: error instanceof Error ? error.message : "Approval request rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/decisions", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.recordDecision(body);
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const body = ApprovalDecisionSchema.parse(req.body) as any;
+      const result = globalEnterpriseApprovalsService.recordDecision({ ...body, approverId: ctx.userId, approverRole: String(ctx.roles?.[0] || "ADMIN"), tenantId: ctx.tenantId });
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_DECISION_REJECTED", message: error instanceof Error ? error.message : "Approval decision rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/:id/execute", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.executeApprovedRequest(id, body.executorId || "SYSTEM");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const { id } = req.params as { id: string };
+      z.string().min(1).max(128).parse(id);
+      ApprovalActionSchema.parse(req.body || {});
+      const result = globalEnterpriseApprovalsService.executeApprovedRequest(id, ctx.userId, ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_EXECUTION_REJECTED", message: error instanceof Error ? error.message : "Approval execution rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/:id/cancel", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.cancelRequest(id, body.cancelledBy || "SYSTEM", body.reason || "");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const { id } = req.params as { id: string };
+      const body = ApprovalActionSchema.parse(req.body || {});
+      const result = globalEnterpriseApprovalsService.cancelRequest(id, ctx.userId, body.reason || "", ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_CANCEL_REJECTED", message: error instanceof Error ? error.message : "Approval cancellation rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/:id/escalate", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.escalateRequest(id, body.escalatedBy || "SYSTEM", body.reason || "SLA exceeded");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const { id } = req.params as { id: string };
+      const body = ApprovalActionSchema.parse(req.body || {});
+      const result = globalEnterpriseApprovalsService.escalateRequest(id, ctx.userId, body.reason || "SLA exceeded", ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_ESCALATION_REJECTED", message: error instanceof Error ? error.message : "Approval escalation rejected" } });
+    }
   });
 
   server.get("/api/v1/approvals/:id", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const ctx = requireTenantContext(req);
     const { id } = req.params as { id: string };
-    const request = globalEnterpriseApprovalsService.getRequest(id);
+    const request = globalEnterpriseApprovalsService.getRequest(id, ctx.tenantId);
     return request
       ? reply.status(200).send({ success: true, data: request })
       : reply.status(404).send({ success: false, error: "Approval request not found" });
@@ -6156,22 +6557,39 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/approvals/:id/audit", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const ctx = requireTenantContext(req);
     const { id } = req.params as { id: string };
-    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getAuditTrail(id) });
+    z.string().min(1).max(128).parse(id);
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getAuditTrail(id, ctx.tenantId) });
   });
 
   server.get("/api/v1/approvals/dashboard/health", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getDashboardMetrics() });
   });
 
   server.post("/api/v1/approvals/delegations", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.registerDelegation(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const body = ApprovalDelegationRequestSchema.parse(req.body);
+      const result = globalEnterpriseApprovalsService.registerDelegation({
+        delegationId: `DEL-${ctx.userId}-${Date.now()}`,
+        originalApproverId: ctx.userId,
+        delegateId: body.delegateId,
+        scope: body.scope,
+        validFrom: body.validFrom,
+        validUntil: body.validUntil,
+        isActive: true,
+        reason: body.reason,
+        createdAt: new Date().toISOString(),
+      });
+      return reply.status(result.success ? 201 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_DELEGATION_REJECTED", message: error instanceof Error ? error.message : "Approval delegation rejected" } });
+    }
   });
-
 
   // ─── Phase 35 — Finance & Treasury REST API (/api/v1/treasury/*) ───
   server.get("/api/v1/treasury/bank-accounts", async (req, reply) => {
@@ -6251,16 +6669,29 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/treasury/payment-runs", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
-    const body = (req.body as any) || {};
-    const result = globalFinanceTreasuryService.createPaymentRun(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    try {
+      const ctx = requireCommercialPermission(req, "payments.manage", "finance.manage");
+      const body = (req.body as any) || {};
+      if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > 500) throw new Error("PAYMENT_RUN_ITEMS_INVALID");
+      if (!body.idempotencyKey || String(body.idempotencyKey).trim().length > 200) throw new Error("PAYMENT_RUN_IDEMPOTENCY_KEY_INVALID");
+      const result = globalFinanceTreasuryService.createPaymentRun({
+        ...body,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        initiatedBy: ctx.userId,
+      });
+      return reply.status(result.success ? 201 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "PAYMENT_RUN_REJECTED", message: error instanceof Error ? error.message : "Payment run rejected" } });
+    }
   });
 
   server.post("/api/v1/treasury/payment-runs/:id/liquidity-check", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const ctx = requireTenantContext(req);
     const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalFinanceTreasuryService.performLiquidityCheck(id, Number(body.availableLiquidity || 0));
+    const body = z.object({ availableLiquidity: z.number().finite().nonnegative() }).strict().parse(req.body);
+    const result = globalFinanceTreasuryService.performLiquidityCheck(id, body.availableLiquidity, ctx.tenantId);
     return reply.status(result.success ? 200 : 422).send(result);
   });
 
@@ -6274,10 +6705,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/treasury/payment-runs/:id/execute", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalFinanceTreasuryService.executePaymentRun(id, body.executorId || "SYSTEM");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireCommercialPermission(req, "payments.manage", "finance.manage");
+      const { id } = req.params as { id: string };
+      z.string().trim().min(1).max(128).parse(id);
+      const result = globalFinanceTreasuryService.executePaymentRun(id, ctx.userId, ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "PAYMENT_RUN_EXECUTION_REJECTED", message: error instanceof Error ? error.message : "Payment run execution rejected" } });
+    }
   });
 
   server.post("/api/v1/treasury/beneficiaries", async (req, reply) => {
@@ -6545,10 +6981,66 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
+  server.get("/api/v1/notifications", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const ctx = requireTenantContext(req);
+    const query = (req.query as any) || {};
+    const scope = query.scope === "super-admin" ? "SUPER_ADMIN" : "TENANT";
+    if (scope === "SUPER_ADMIN") requireSuperAdminContext(req);
+    const data = await globalNotificationService.list(ctx, scope, Number(query.limit || 100));
+    return reply.status(200).send({ success: true, data: { notifications: data } });
+  });
+
+  server.post("/api/v1/notifications/:id/read", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const ctx = requireTenantContext(req);
+    const { id } = req.params as { id: string };
+    const data = await globalNotificationService.markRead(ctx, id);
+    return reply.status(200).send({ success: true, data });
+  });
+
+  server.post("/api/v1/notifications/read-all", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const ctx = requireTenantContext(req);
+    const scope = (req.body as any)?.scope;
+    const data = await globalNotificationService.markAllRead(ctx, scope === "SUPER_ADMIN" || scope === "TENANT" ? scope : undefined);
+    return reply.status(200).send({ success: true, data });
+  });
+
+  server.post("/api/v1/notifications", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const ctx = requireAdminContext(req);
+    const body = z.object({
+      recipientUserId: z.string().uuid().optional(),
+      branchId: z.string().uuid().nullable().optional(),
+      scope: z.enum(["TENANT", "SUPER_ADMIN"]).default("TENANT"),
+      category: z.enum(["SYSTEM","INVENTORY","PAYMENT","APPROVAL","SYNC","POS","SUPPORT","SECURITY","FLEET"]),
+      severity: z.enum(["CRITICAL","WARNING","INFO"]).default("INFO"),
+      channel: z.enum(["SMS","EMAIL","PUSH","WHATSAPP","IN_APP"]).default("IN_APP"),
+      title: z.string().trim().min(1).max(200),
+      description: z.string().trim().min(1).max(2000),
+      actionPath: z.string().trim().optional(),
+      actionLabel: z.string().trim().optional(),
+      dedupeKey: z.string().trim().min(1).max(300).optional(),
+    }).parse(req.body);
+    if (body.scope === "SUPER_ADMIN") requireSuperAdminContext(req);
+    const data = await globalNotificationService.publish(ctx, body);
+    return reply.status(201).send({ success: true, data });
+  });
+
+  server.post("/api/v1/notifications/:id/retry", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const ctx = requireAdminContext(req);
+    const { id } = req.params as { id: string };
+    const data = await globalNotificationService.retryOne(ctx, id);
+    return reply.status(200).send({ success: true, data });
+  });
+
   server.get("/api/v1/notifications/health", async (req, reply) => {
     const { globalNotificationService } = await import("./services/notificationService.js");
-    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
-    return reply.status(200).send({ success: true, data: globalNotificationService.getHealthSummary(tenantId) });
+    const ctx = requireTenantContext(req);
+    const data = await globalNotificationService.getHealthSummary(ctx);
+    return reply.status(200).send({ success: true, data });
   });
 
   server.get("/api/v1/compliance/health", async (req, reply) => {
@@ -6647,6 +7139,7 @@ export async function startServer(): Promise<FastifyInstance> {
   while (true) {
     try {
       await server.listen({ port, host });
+      if (productionPersistence && process.env.NODE_ENV === "production") startTraVfdReconciliationWorker();
       break;
     } catch (err: any) {
       if (err?.code === "EADDRINUSE" && attempts < 5) {

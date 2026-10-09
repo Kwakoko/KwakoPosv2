@@ -78,6 +78,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Foundation Production Lock A01-A12
+        run: npm run certify:foundation
+      - name: Super Admin Production Lock
+        run: npm run certify:super-admin
+      - name: Security Platform Production Lock
+        run: npm run certify:security-platform-lock
+      - name: Platform Services C01-C11 Production Lock
+        run: npm run certify:platform-services-lock
+
       - name: Generate Prisma client
         run: npm run db:generate
 
@@ -86,10 +95,37 @@ jobs:
 
       - name: Production Navigation Lock — route/submenu contract
         run: npm run certify:navigation-lock
+      - name: Reports Production Lock
+        run: npm run certify:reports
       - name: Production Dashboard Analytics Lock
         run: npm run certify:dashboard-lock
       - name: Conflict Center Production Lock
         run: npx tsx scripts/certification/conflict-center-production-lock.ts
+
+      - name: Inventory Production Lock v1
+        run: npm run certify:inventory-lock
+      - name: Administration Production Lock
+        run: npm run certify:administration-lock
+      - name: Sales Production Lock v1
+        run: npm run certify:sales-lock
+      - name: Pricing / Promotions Production Lock
+        run: npm run certify:pricing-lock
+      - name: Receipt Store Production Lock v1
+        run: npm run certify:receipts-lock
+      - name: Notifications Production Lock v1
+        run: npm run certify:notifications-lock
+      - name: Cash Management Production Lock v1
+        run: npm run certify:cash-lock
+      - name: Finance / Accounting Production Lock v1
+        run: npm run certify:finance-lock
+      - name: Tax / Fiscalization Production Lock v1
+        run: npm run certify:tax-fiscal-lock
+      - name: Backdated Inventory Production Lock
+        run: npm run certify:backdated-lock
+      - name: Offline Sync Platform Production Lock
+        run: npm run certify:offline-sync-lock
+      - name: Support Production Lock v1
+        run: npm run certify:support-lock
 
       - name: Validate conventional commit
         run: npx tsx scripts/ci/validate-commit-message.ts
@@ -99,6 +135,8 @@ jobs:
 
       - name: Validate version consistency
         run: npx tsx scripts/release/version-consistency-gate.ts
+      - name: SemVer Production Lock
+        run: npm run certify:semver-lock
 
       - name: Build all workspaces
         run: npm run build
@@ -118,9 +156,6 @@ jobs:
       - name: Execute 17-Domain Full-System Certification Campaign
         run: npm run certify:campaign
 
-      # Security certification performs real HTTP authentication/session/RBAC checks.
-      # Do not replace this with a mock server: the security engine deliberately fails
-      # when live execution is unavailable (BLOCKED_EXTERNAL).
       - name: Start local API for executable security acceptance tests
         shell: bash
         env:
@@ -134,17 +169,15 @@ jobs:
           if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
             exit 0
           fi
-          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-exact-release-security-api.log 2>&1 &
-          echo $! > /tmp/kwakopos-exact-release-security-api.pid
+          nohup npx tsx apps/api/src/server.ts > /tmp/kwakopos-exact-security-api.log 2>&1 &
+          echo $! > /tmp/kwakopos-exact-security-api.pid
           for i in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
-              echo "Local security API is healthy on http://127.0.0.1:3000"
               exit 0
             fi
             sleep 1
           done
-          echo "SECURITY_GATE_BLOCKED: local API failed to become healthy"
-          cat /tmp/kwakopos-exact-release-security-api.log
+          cat /tmp/kwakopos-exact-security-api.log
           exit 1
 
       - name: Execute Phase 12 Security & Compliance Certification Engine
@@ -156,11 +189,9 @@ jobs:
         if: always()
         shell: bash
         run: |
-          set +e
-          if [[ -f /tmp/kwakopos-exact-release-security-api.pid ]]; then
-            PID="$(cat /tmp/kwakopos-exact-release-security-api.pid)"
-            kill "$PID" 2>/dev/null || true
-            pkill -P "$PID" 2>/dev/null || true
+          if [[ -f /tmp/kwakopos-exact-security-api.pid ]]; then
+            kill "$(cat /tmp/kwakopos-exact-security-api.pid)" 2>/dev/null || true
+            pkill -P "$(cat /tmp/kwakopos-exact-security-api.pid 2>/dev/null)" 2>/dev/null || true
           fi
 
       - name: Run synthetic monitoring
@@ -176,10 +207,19 @@ jobs:
           [[ -n "$GCP_PROJECT_ID" ]] || { echo "RELEASE_BLOCKED: GCP project missing"; exit 1; }
           [[ -n "$GCP_WIF_PROVIDER" && -n "$GCP_SERVICE_ACCOUNT" ]] || { echo "RELEASE_BLOCKED: GCP WIF configuration missing"; exit 1; }
 
+      - name: Normalize Google Workload Identity Provider
+        id: normalize-gcp-wif
+        shell: bash
+        env:
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          set -euo pipefail
+          python scripts/release/normalize-gcp-wif-provider.py "$GCP_WIF_PROVIDER" >> "$GITHUB_OUTPUT"
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          workload_identity_provider: ${{ steps.normalize-gcp-wif.outputs.provider }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup Google Cloud SDK

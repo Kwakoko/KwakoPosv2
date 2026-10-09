@@ -33,6 +33,9 @@ describe("Semantic Versioning (SemVer 2.0.0) Engine", () => {
       expect(isValidSemVer("2.1.0-beta.2")).toBe(true);
       expect(isValidSemVer("2.0")).toBe(false);
       expect(isValidSemVer("alpha")).toBe(false);
+      expect(isValidSemVer("01.2.3")).toBe(false);
+      expect(isValidSemVer("1.02.3")).toBe(false);
+      expect(isValidSemVer("1.2.03")).toBe(false);
     });
 
     it("compares versions accurately", () => {
@@ -41,6 +44,14 @@ describe("Semantic Versioning (SemVer 2.0.0) Engine", () => {
       expect(compareSemVer("3.0.0", "2.9.9")).toBeGreaterThan(0);
       expect(compareSemVer("2.0.0", "2.0.0")).toBe(0);
       expect(compareSemVer("2.0.0", "2.0.0-rc.1")).toBeGreaterThan(0);
+    });
+
+    it("uses SemVer numeric prerelease ordering rather than lexical ordering", () => {
+      expect(compareSemVer("1.0.0-alpha.2", "1.0.0-alpha.10")).toBeLessThan(0);
+      expect(compareSemVer("1.0.0-1", "1.0.0-alpha")).toBeLessThan(0);
+      expect(compareSemVer("1.0.0-alpha.1", "1.0.0-alpha.beta")).toBeLessThan(0);
+      expect(compareSemVer("1.0.0-alpha", "1.0.0-alpha.1")).toBeLessThan(0);
+      expect(compareSemVer("1.0.0-alpha.1", "1.0.0")).toBeLessThan(0);
     });
   });
 

@@ -1,19 +1,15 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
-import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma } from "@kwakopos2/database";
+import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma, validateBundleDefinitionAttributes } from "@kwakopos2/database";
 import { assertSyncConflictPermission, computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, requireBaseUpdatedAt, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
 import { calculateAuthoritativeStock, projectProductBranchStock, projectProductStockSummary, projectVariantInventory, rejectNonZeroAbsoluteInventoryMutation } from "@kwakopos2/database";
-import { ReceiptEngine, ReceiptNumberGenerator } from "@kwakopos2/domain";
+import { ReceiptEngine, ReceiptNumberGenerator, assertBackdatingThreshold, assertBackdatingPermission, assertSaleBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline } from "@kwakopos2/domain";
 import {
   buildDomainEvent,
   ensureDurableDomainEventJournal,
   persistDomainEvent,
   publishPendingDomainEvents,
 } from "./durableDomainEventBridge.js";
-import { applyInventoryProductionLockOperation } from "./inventoryProductionLock.js";
-import { applyPayablesProductionLockOperation } from "./payablesProductionLock.js";
-import { applyReceivablesProductionLockOperation } from "./receivablesProductionLock.js";
-import { applyPaymentsProductionLockOperation } from "./paymentsProductionLock.js";
 
 const MAX_DELTA = 500;
 
@@ -100,9 +96,7 @@ export class WorldStandardPrismaSyncEngine {
       if (visited.has(cursorId)) throw new Error("Category hierarchy contains an existing cycle");
       visited.add(cursorId);
       const parent: any = await db.category.findUnique({ where: { id: cursorId } });
-      if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) {
-        throw new Error("Parent category belongs to another tenant/branch or is inactive");
-      }
+      if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) throw new Error("Parent category belongs to another tenant/branch or is inactive");
       if (parent.id === categoryId) throw new Error("Category hierarchy cannot contain a circular parent chain");
       cursorId = parent.parentId ?? null;
     }
@@ -111,20 +105,28 @@ export class WorldStandardPrismaSyncEngine {
   private ensureInfrastructure(): Promise<void> {
     if (this.infrastructureReady) return this.infrastructureReady!;
     this.infrastructureReady = (async () => {
-      await prisma.$executeRawUnsafe(`CREATE SEQUENCE IF NOT EXISTS sync_change_revision_seq`);
-      await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_change_journal (revision BIGINT PRIMARY KEY DEFAULT nextval('sync_change_revision_seq'), tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL, record JSONB NOT NULL, source TEXT NOT NULL DEFAULT 'push', created_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
-      await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS sync_change_journal_tenant_branch_operation_uq ON sync_change_journal (tenant_id, branch_id, operation_id)`);
-      await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_scope_revision_idx ON sync_change_journal (tenant_id, branch_id, revision)`);
-      await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_entity_idx ON sync_change_journal (tenant_id, branch_id, entity_type, entity_id, revision)`);
-      await ensureDurableDomainEventJournal(prisma);
-       await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_conflict_record (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL DEFAULT 'UPDATE', local_payload JSONB NOT NULL, remote_payload JSONB NOT NULL, local_fingerprint TEXT, remote_fingerprint TEXT, status TEXT NOT NULL DEFAULT 'OPEN', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), resolved_at TIMESTAMPTZ, resolved_by TEXT, resolution_operation_id TEXT, resolved_server_revision BIGINT, resolved_entity_fingerprint TEXT)`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS operation_type TEXT NOT NULL DEFAULT 'UPDATE'`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS local_fingerprint TEXT`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS remote_fingerprint TEXT`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_by TEXT`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolution_operation_id TEXT`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_server_revision BIGINT`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_entity_fingerprint TEXT`);
+      // Multiple sync engine instances can initialize against the same PostgreSQL
+      // database concurrently (especially in multi-device tests and clustered API
+      // workers). PostgreSQL's CREATE INDEX IF NOT EXISTS is not sufficient to
+      // serialize concurrent DDL, so hold a transaction-scoped advisory lock around
+      // the complete infrastructure bootstrap.
+      await prisma.$transaction(async (tx: any) => {
+        await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtextextended('kwakopos:sync-infrastructure', 0))`);
+        await tx.$executeRawUnsafe(`CREATE SEQUENCE IF NOT EXISTS sync_change_revision_seq`);
+        await tx.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_change_journal (revision BIGINT PRIMARY KEY DEFAULT nextval('sync_change_revision_seq'), tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL, record JSONB NOT NULL, source TEXT NOT NULL DEFAULT 'push', created_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+        await tx.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS sync_change_journal_tenant_branch_operation_uq ON sync_change_journal (tenant_id, branch_id, operation_id)`);
+        await tx.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_scope_revision_idx ON sync_change_journal (tenant_id, branch_id, revision)`);
+        await tx.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_entity_idx ON sync_change_journal (tenant_id, branch_id, entity_type, entity_id, revision)`);
+        await ensureDurableDomainEventJournal(tx);
+        await tx.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_conflict_record (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL DEFAULT 'UPDATE', local_payload JSONB NOT NULL, remote_payload JSONB NOT NULL, local_fingerprint TEXT, remote_fingerprint TEXT, status TEXT NOT NULL DEFAULT 'OPEN', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), resolved_at TIMESTAMPTZ, resolved_by TEXT, resolution_operation_id TEXT, resolved_server_revision BIGINT, resolved_entity_fingerprint TEXT)`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS operation_type TEXT NOT NULL DEFAULT 'UPDATE'`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS local_fingerprint TEXT`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS remote_fingerprint TEXT`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_by TEXT`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolution_operation_id TEXT`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_server_revision BIGINT`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_entity_fingerprint TEXT`);
+      });
     })();
     return this.infrastructureReady!;
   }
@@ -235,10 +237,14 @@ export class WorldStandardPrismaSyncEngine {
       case "Product": record = await tx.product.findUnique({ where: { id: entityId } }); break;
       case "ProductVariant": record = await tx.productVariant.findUnique({ where: { id: entityId } }); break;
       case "Customer": record = await tx.customer.findUnique({ where: { id: entityId } }); break;
-      case "CustomerInvoice": record = await tx.customerInvoice.findUnique({ where: { id: entityId }, include: { lines: true, allocations: true } }); break;
-      case "SupplierInvoice": record = await tx.supplierInvoice.findUnique({ where: { id: entityId }, include: { lines: true, allocations: true } }); break;
-      case "Payment": record = await tx.payment.findUnique({ where: { id: entityId } }); break;
-      case "PaymentAllocation": record = await tx.paymentAllocation.findUnique({ where: { id: entityId } }); break;
+      case "CustomerContact": {
+        const rows = await tx.$queryRawUnsafe(
+          'SELECT * FROM customer_contacts WHERE id=$1::uuid AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
+          entityId, ctx.tenantId, ctx.branchId,
+        );
+        record = rows[0] || null;
+        break;
+      }
       case "Supplier": record = await tx.supplier.findUnique({ where: { id: entityId } }); break;
       case "Category": record = await tx.category.findUnique({ where: { id: entityId } }); break;
       case "Brand": record = await tx.brand.findUnique({ where: { id: entityId } }); break;
@@ -277,16 +283,19 @@ export class WorldStandardPrismaSyncEngine {
         case "StockAdjustment": return await db.stockAdjustment.findUnique({ where: { id: op.entityId } });
         case "StockLedger": return await db.stockLedger.findUnique({ where: { id: op.entityId } });
         case "Customer": return await db.customer.findUnique({ where: { id: op.entityId } });
-        case "CustomerInvoice": return await db.customerInvoice.findUnique({ where: { id: op.entityId }, include: { lines: true, allocations: true } });
-        case "SupplierInvoice": return await db.supplierInvoice.findUnique({ where: { id: op.entityId }, include: { lines: true, allocations: true } });
-        case "PaymentAllocation": return await db.paymentAllocation.findUnique({ where: { id: op.entityId } });
+        case "CustomerContact": {
+          const rows = await db.$queryRawUnsafe(
+            'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE id=$1::uuid AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
+            op.entityId, ctx.tenantId, ctx.branchId,
+          );
+          return rows[0] || null;
+        }
         case "Supplier": return await db.supplier.findUnique({ where: { id: op.entityId } });
         case "Category": return await db.category.findUnique({ where: { id: op.entityId } });
         case "Brand": return await db.brand.findUnique({ where: { id: op.entityId } });
         case "Sale": return await db.sale.findUnique({ where: { id: op.entityId }, include: { lines: true, payments: true } });
         case "PurchaseOrder": return await db.purchaseOrder.findUnique({ where: { id: op.entityId }, include: { items: true } });
         case "PurchaseReceipt": return await db.purchaseReceipt.findUnique({ where: { id: op.entityId }, include: { items: true } });
-        case "PurchaseReturn": return await db.return.findUnique({ where: { id: op.entityId }, include: { lines: true } });
         case "Payment": return await db.payment.findUnique({ where: { id: op.entityId } });
         case "Expense": return await db.expense.findUnique({ where: { id: op.entityId } });
         case "Setting": {
@@ -341,14 +350,12 @@ export class WorldStandardPrismaSyncEngine {
     // These business commands can atomically create one or more immutable
     // StockLedger rows. The ledger rows are inventory truth, so every row must be
     // independently replayable by downstream replicas.
-    const generatedLedgerTypes = new Set(["StockAdjustment", "Sale", "PurchaseReceipt", "UnitConversionTransaction", "StockTransfer", "StockCount", "ProductBundle", "WastageRecord"]);
+    const generatedLedgerTypes = new Set(["StockAdjustment", "Sale", "PurchaseReceipt", "UnitConversionTransaction"]);
     if (!generatedLedgerTypes.has(op.entityType)) return;
 
     const operationIdFilter = op.entityType === "UnitConversionTransaction"
       ? { startsWith: `${op.operationId}-` }
-      : ["StockTransfer", "StockCount", "ProductBundle"].includes(op.entityType)
-        ? { startsWith: `${op.operationId}:` }
-        : op.operationId;
+      : op.operationId;
     const ledgers = await db.stockLedger.findMany({
       where: {
         tenantId: ctx.tenantId,
@@ -406,12 +413,12 @@ export class WorldStandardPrismaSyncEngine {
          FROM sync_operations so
         WHERE so.tenant_id = $1 AND so.branch_id = $2 AND so.status = 'PROCESSED'
           AND so.operation_type = 'CREATE'
-          AND so.entity_type IN ('StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction', 'StockTransfer', 'StockCount', 'ProductBundle', 'WastageRecord')
+          AND so.entity_type IN ('StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction')
           AND NOT EXISTS (
             SELECT 1 FROM sync_change_journal cj
              WHERE cj.tenant_id = so.tenant_id
                AND cj.branch_id = so.branch_id
-               AND (cj.operation_id LIKE so.operation_id || ':%' OR cj.operation_id LIKE so.operation_id || '-%')
+               AND cj.operation_id LIKE so.operation_id || ':ledger:%'
           )
         ORDER BY so.created_at ASC LIMIT 1000`,
       ctx.tenantId, ctx.branchId,
@@ -431,7 +438,7 @@ export class WorldStandardPrismaSyncEngine {
 
   private async applyOperationInTransaction(ctx: TenantContext, req: SyncPushRequest, op: SyncPushRequest["operations"][number], tx: any): Promise<void> {
     const preconditionedEntities = new Set([
-      "Product", "ProductVariant", "Customer", "CustomerInvoice", "SupplierInvoice", "Supplier", "Category", "Brand", "Expense",
+      "Product", "ProductVariant", "Customer", "Supplier", "Category", "Brand", "Expense",
     ]);
     if (op.entityType === "ProductVariant" && op.operationType === "UPDATE") {
       // Preserve the domain-specific ledger-only error for forbidden absolute inventory writes.
@@ -439,16 +446,6 @@ export class WorldStandardPrismaSyncEngine {
     }
     if (preconditionedEntities.has(op.entityType) && ["UPDATE", "DELETE"].includes(op.operationType)) {
       requireBaseUpdatedAt(op.payload, op.entityType);
-    }
-
-    if (await applyInventoryProductionLockOperation(ctx, req, op, tx, (priceCtx, priceReq, priceDb) => this.productRepo.recordPriceChange(priceCtx, priceReq, priceDb))) return;
-    if (op.entityType === "Payment" && op.operationType !== "CREATE") {
-      if (await applyPaymentsProductionLockOperation(ctx, req, op, tx)) return;
-    }
-    if (await applyPayablesProductionLockOperation(ctx, req, op, tx)) return;
-    if (await applyReceivablesProductionLockOperation(ctx, req, op, tx)) return;
-    if (op.entityType === "Payment" && op.operationType === "CREATE") {
-      if (await applyPaymentsProductionLockOperation(ctx, req, op, tx)) return;
     }
 
     if (op.entityType === "Setting" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
@@ -536,7 +533,9 @@ export class WorldStandardPrismaSyncEngine {
       if (op.operationType === "DELETE") {
         const replacementId = payload.replacementId;
         const count = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: op.entityId, isActive: true } });
+        const childCount = await tx.category.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, parentId: op.entityId, isActive: true } });
         if (count > 0 && !replacementId) throw new Error("Category has assigned products; replacementId is required");
+        if (childCount > 0) throw new Error("Category has active child categories; remove or reassign them before deleting");
         if (replacementId) {
           if (replacementId === op.entityId) throw new Error("Replacement category must differ from deleted category");
           const replacement = await tx.category.findUnique({ where: { id: replacementId } });
@@ -549,7 +548,7 @@ export class WorldStandardPrismaSyncEngine {
       if (payload.parentId !== undefined) await this.assertValidCategoryParent(tx, ctx, op.entityId, payload.parentId ?? null);
       const name = payload.name === undefined ? undefined : String(payload.name).trim();
       await tx.category.update({ where: { id: op.entityId }, data: { name, code: payload.code === undefined ? undefined : String(payload.code).trim().toUpperCase(), parentId: payload.parentId !== undefined ? payload.parentId : undefined, description: payload.description !== undefined ? (String(payload.description).trim() || null) : undefined, color: payload.color !== undefined ? (String(payload.color).trim() || null) : undefined, isActive: payload.isActive } });
-      if (name !== undefined && name !== existing.name) await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: op.entityId }, data: { category: name } });
+      if (name !== undefined && payload.cascadeAssignedProducts !== false && name !== existing.name) await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: op.entityId }, data: { category: name } });
       return;
     }
 
@@ -694,7 +693,69 @@ export class WorldStandardPrismaSyncEngine {
       const base = getBaseUpdatedAt(op.payload);
       if (base && current.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: customer changed on server");
       const payload: any = stripSyncControlFields(op.payload as any);
-      await tx.customer.update({ where: { id: op.entityId }, data: op.operationType === "DELETE" ? { status: "INACTIVE" } : { customerCode: payload.customerCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, creditLimit: payload.creditLimit ?? undefined, openingBalance: payload.openingBalance ?? undefined, status: payload.status ?? "ACTIVE" } });
+      if (op.operationType === "DELETE") {
+        if (Number(current.currentBalance) > 0.005) throw new Error("CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE");
+        await tx.customer.update({ where: { id: op.entityId }, data: { status: "INACTIVE" } });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: op.entityId,
+          metadata: { operationId: op.operationId, previousStatus: current.status },
+        }});
+      } else {
+        await tx.customer.update({
+          where: { id: op.entityId },
+          data: {
+            customerCode: payload.customerCode ?? undefined,
+            name: payload.name ?? current.name,
+            phone: payload.phone ?? null,
+            email: payload.email ?? null,
+            address: payload.address ?? null,
+            creditLimit: payload.creditLimit ?? undefined,
+            status: payload.status ?? "ACTIVE",
+          },
+        });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: op.entityId,
+          metadata: { changedFields: Object.keys(payload).filter((k) => k !== "_baseUpdatedAt").sort() },
+        }});
+      }
+      return;
+    }
+
+    if (op.entityType === "Supplier" && ["UPDATE", "DELETE"].includes(op.operationType)) {
+      const current = await tx.supplier.findUnique({ where: { id: op.entityId } });
+      if (!current) { if (op.operationType === "DELETE") return; throw new Error("Supplier not found"); }
+      if (current.tenantId !== ctx.tenantId || current.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+      const base = getBaseUpdatedAt(op.payload);
+      if (base && current.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: supplier changed on server");
+      const payload: any = stripSyncControlFields(op.payload as any);
+      if (op.operationType === "DELETE") {
+        await tx.supplier.update({ where: { id: op.entityId }, data: { status: "INACTIVE" } });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "SUPPLIER_ARCHIVED", entityType: "Supplier", entityId: op.entityId,
+          metadata: { operationId: op.operationId, previousStatus: current.status },
+        }});
+      } else {
+        await tx.supplier.update({
+          where: { id: op.entityId },
+          data: {
+            supplierCode: payload.supplierCode ?? undefined,
+            name: payload.name ?? current.name,
+            phone: payload.phone ?? null,
+            email: payload.email ?? null,
+            address: payload.address ?? null,
+            taxPin: payload.taxPin ?? null,
+            status: payload.status ?? "ACTIVE",
+          },
+        });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: op.entityId,
+          metadata: { changedFields: Object.keys(payload).filter((k) => k !== "_baseUpdatedAt").sort() },
+        }});
+      }
       return;
     }
 
@@ -713,23 +774,63 @@ export class WorldStandardPrismaSyncEngine {
       const payload = op.payload as any;
       const existing = await tx.stockAdjustment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: op.idempotencyKey } });
       if (existing) return;
+      // POS sale stock is provisionally materialized locally with the Sale outbox.
+      // The authoritative Sale transaction creates the canonical server StockLedger movement;
+      // do not apply the companion StockAdjustment as a second inventory mutation.
+      if (String(payload.referenceType || "").toUpperCase() === "SALE" && payload.referenceId) return;
       await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`, payload.variantId, ctx.tenantId, ctx.branchId);
       const variant = await tx.productVariant.findUnique({ where: { id: payload.variantId } });
       if (!variant || variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
       let changeQty = Number(payload.quantityChange ?? 0);
       if (payload.adjustmentType === "DECREASE") changeQty = -Math.abs(changeQty);
+
+      const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
+      const isBackdated = Boolean(payload.occurredAt) && Math.abs(Date.now() - occurredAt.getTime()) > 5 * 60 * 1000;
+      if (isBackdated) assertBackdatingPermission(ctx);
+      if (payload.occurredAt) assertBackdatingThreshold(payload.occurredAt);
+
+      const ledgerRows = await tx.stockLedger.findMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId },
+        orderBy: { occurredAt: "asc" },
+      });
+      const currentStock = calculateAvailableStock(ledgerRows.map(ledgerShape));
+      const historicalRows = isBackdated
+        ? ledgerRows.filter((row: any) => new Date(row.occurredAt || row.createdAt).getTime() < occurredAt.getTime())
+        : [];
+      const historicalStock = isBackdated ? calculateAvailableStock(historicalRows.map(ledgerShape)) : currentStock;
+
       if (payload.adjustmentType === "SET") {
-        const ledger = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId } });
-        const currentStock = ledger.reduce((sum: number, row: any) => sum + Number(row.quantityChange ?? row.quantity ?? 0), 0);
-        changeQty = Number(payload.quantityChange) - currentStock;
+        changeQty = Number(payload.quantityChange) - historicalStock;
       }
-      const beforeSum = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId } });
-      const quantityBefore = Number(beforeSum._sum.quantityChange ?? 0);
+
+      if (isBackdated) {
+        const validation = validateRetroactiveTimeline(ledgerRows.map(ledgerShape), occurredAt, changeQty);
+        if (!validation.valid) {
+          throw new Error(
+            `INSUFFICIENT_STOCK: Retroactive adjustment would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`
+          );
+        }
+        const closedPeriod = await tx.accountingPeriod.findFirst({
+          where: {
+            tenantId: ctx.tenantId,
+            startDate: { lte: occurredAt },
+            endDate: { gte: occurredAt },
+            status: { in: ["CLOSED", "LOCKED"] },
+          },
+        });
+        if (closedPeriod) {
+          const code = closedPeriod.status === "LOCKED" ? "ACCOUNTING_PERIOD_LOCKED" : "ACCOUNTING_PERIOD_CLOSED";
+          throw new Error(`${code}: Cannot backdate inventory adjustment into accounting period "${closedPeriod.name}".`);
+        }
+      }
+
+      const quantityBefore = isBackdated ? historicalStock : currentStock;
       const quantityAfter = quantityBefore + changeQty;
-      if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
+      const currentProjectedStock = currentStock + changeQty;
+      if (quantityAfter < 0 || currentProjectedStock < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
       const unitCost = Number(payload.unitCost ?? variant.costPrice ?? 0);
       const adjustment = await tx.stockAdjustment.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId, adjustmentType: payload.adjustmentType, quantityChange: changeQty, reason: payload.reason, referenceNote: payload.referenceNote ?? null, status: "COMPLETED", createdByUserId: ctx.userId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
-      await tx.stockLedger.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: payload.variantId, movementType: changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS", quantityChange: changeQty, quantity: changeQty, quantityBefore, quantityAfter, unitCost, totalCost: Math.abs(changeQty) * unitCost, referenceType: "StockAdjustment", referenceId: adjustment.id, occurredAt: new Date(), deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
+      await tx.stockLedger.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: payload.variantId, movementType: changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS", quantityChange: changeQty, quantity: changeQty, quantityBefore, quantityAfter, unitCost, totalCost: Math.abs(changeQty) * unitCost, referenceType: "StockAdjustment", referenceId: adjustment.id, occurredAt, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
 
       await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, payload.variantId);
       await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, payload.variantId, null);
@@ -823,8 +924,23 @@ const now = new Date();
     }
 
     if (op.entityType === "Sale" && op.operationType === "CREATE") {
+      const payload: any = op.payload || {};
+      const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : null;
+      const isBackdated = Boolean(payload.isBackdated || (occurredAt && Math.abs(Date.now() - occurredAt.getTime()) > 5 * 60 * 1000));
+      if (payload.isBackdated && !occurredAt) throw new Error("BACKDATED_SALE_DATE_REQUIRED");
+      if (isBackdated) {
+        assertSaleBackdatingPermission(ctx);
+        assertBackdatingThreshold(occurredAt as Date);
+        const closedPeriod = await tx.accountingPeriod.findFirst({
+          where: { tenantId: ctx.tenantId, startDate: { lte: occurredAt as Date }, endDate: { gte: occurredAt as Date }, status: { in: ["CLOSED", "LOCKED"] } },
+        });
+        if (closedPeriod) {
+          const code = closedPeriod.status === "LOCKED" ? "ACCOUNTING_PERIOD_LOCKED" : "ACCOUNTING_PERIOD_CLOSED";
+          throw new Error(`${code}: Cannot backdate sale into accounting period "${closedPeriod.name}".`);
+        }
+      }
       const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
-      await financeTx.createSale(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
+      await financeTx.createSale(ctx, { ...payload, id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
       return;
     }
 
@@ -979,43 +1095,6 @@ const now = new Date();
       const base = getBaseUpdatedAt(op.payload);
       if (base && existing.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: expense changed on server");
 
-      if (payload.approvalStatus === "APPROVED" && existing.approvalStatus !== "APPROVED") {
-        await financeTx.approveExpense(ctx, op.entityId, String(payload.approvalReason || "Approved from synchronized client mutation"));
-      }
-      if (payload.approvalStatus === "REJECTED" && existing.approvalStatus !== "REJECTED") {
-        await financeTx.rejectExpense(ctx, op.entityId, String(payload.approvalReason || "Rejected from synchronized client mutation"));
-        return;
-      }
-
-      if (Array.isArray(payload.attachments)) {
-        for (const attachment of payload.attachments) {
-          const content = String(attachment.contentBase64 || "");
-          if (!content) continue;
-          const buffer = Buffer.from(content, "base64");
-          if (!buffer.length || buffer.length > 5 * 1024 * 1024) throw new Error("EXPENSE_ATTACHMENT_LIMIT_EXCEEDED");
-          const sha256 = createHash("sha256").update(buffer).digest("hex");
-          await tx.expenseAttachment.upsert({
-            where: { expenseId_sha256: { expenseId: op.entityId, sha256 } },
-            create: { id: attachment.id || randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, expenseId: op.entityId, fileName: String(attachment.fileName || "attachment"), mimeType: String(attachment.mimeType || "application/octet-stream"), sizeBytes: buffer.length, sha256, contentBase64: content, createdById: ctx.userId },
-            update: {},
-          });
-        }
-      }
-
-      if (Array.isArray(payload.attachments)
-        && payload.status === undefined
-        && payload.approvalStatus === undefined
-        && payload.category === undefined
-        && payload.reason === undefined
-        && payload.description === undefined
-        && payload.payee === undefined
-        && payload.paymentMethod === undefined
-        && payload.paymentRef === undefined
-        && payload.taxDeductible === undefined
-        && payload.incurredAt === undefined) {
-        return;
-      }
-
       if (payload.status === "VOIDED") {
         await financeTx.voidExpense(ctx, op.entityId, String(payload.voidReason || payload.reason || "Voided from synchronized client mutation"), {
           deviceId: req.deviceId, idempotencyKey: op.idempotencyKey,
@@ -1054,56 +1133,126 @@ const now = new Date();
     if (op.entityType === "Payment" && op.operationType === "CREATE") {
       const payload: any = stripSyncControlFields(op.payload as any);
       const amount = Number(payload.amount);
-      if (!(amount > 0)) throw new Error("PAYMENT_AMOUNT_REQUIRED");
-      if (payload.customerId && payload.supplierId) throw new Error("PAYMENT_ENTITY_AMBIGUOUS");
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("PAYMENT_AMOUNT_REQUIRED");
       const existing = await tx.payment.findUnique({ where: { id: op.entityId } });
       if (existing) {
         if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
         return;
       }
+
       if (payload.customerId) {
-        const customer = await tx.customer.findFirst({ where: { id: payload.customerId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+        const customer = await tx.customer.findFirst({ where: { id: String(payload.customerId), tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
         if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
-        await tx.payment.create({
-          data: {
-            id: op.entityId,
-            tenantId: ctx.tenantId,
-            branchId: ctx.branchId,
-            paymentNumber: payload.paymentNumber || `PAY-CUS-${op.operationId.slice(0, 24)}`,
-            customerId: customer.id,
-            amount,
-            paymentMethod: payload.paymentMethod || "BANK",
-            provider: payload.provider || null,
-            providerReference: payload.providerReference || null,
-            status: "COMPLETED",
-            paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
-          },
-        });
+        const currentBalance = Number(customer.currentBalance || 0);
+        if (amount > currentBalance + 0.005) throw new Error("PAYMENT_EXCEEDS_CUSTOMER_BALANCE");
+        const created = await tx.payment.create({ data: {
+          id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+          paymentNumber: payload.paymentNumber || `PAY-CUST-${op.operationId.slice(0, 24)}`,
+          customerId: customer.id, amount, paymentMethod: payload.paymentMethod || "BANK",
+          provider: payload.provider || null, providerReference: payload.providerReference || null,
+          status: "COMPLETED", paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
+        } });
+        await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { decrement: amount } } });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CUSTOMER_PAYMENT_POSTED", entityType: "Customer", entityId: customer.id,
+          metadata: { paymentId: created.id, amount, paymentMethod: created.paymentMethod, provider: created.provider, providerReference: created.providerReference },
+        }});
         return;
       }
-      if (payload.supplierId) {
-        const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
-        if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
-        if (amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
-        await tx.payment.create({
-          data: {
-            id: op.entityId,
-            tenantId: ctx.tenantId,
-            branchId: ctx.branchId,
-            paymentNumber: payload.paymentNumber || `PAY-SUP-${op.operationId.slice(0, 24)}`,
-            purchaseReceiptId: payload.purchaseReceiptId || null,
-            supplierId: supplier.id,
-            amount,
-            paymentMethod: payload.paymentMethod || "BANK",
-            provider: payload.provider || null,
-            providerReference: payload.providerReference || null,
-            status: "COMPLETED",
-            paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
-          },
-        });
+
+      if (!payload.supplierId) throw new Error("PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED");
+      const supplier = await tx.supplier.findFirst({ where: { id: String(payload.supplierId), tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
+      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+      if (amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
+      await tx.payment.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        paymentNumber: payload.paymentNumber || `PAY-SUP-${op.operationId.slice(0, 24)}`,
+        purchaseReceiptId: payload.purchaseReceiptId || null, supplierId: supplier.id, amount,
+        paymentMethod: payload.paymentMethod || "BANK", provider: payload.provider || null,
+        providerReference: payload.providerReference || null, status: "COMPLETED",
+        paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
+      }});
+      await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: amount } } });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "SUPPLIER_PAYMENT_POSTED", entityType: "Supplier", entityId: supplier.id,
+        metadata: { paymentId: op.entityId, amount, paymentMethod: payload.paymentMethod || "BANK" },
+      }});
+      return;
+    }
+
+    if (op.entityType === "CustomerContact" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const customerId = String(payload.customerId || "");
+      if (!customerId) throw new Error("CONTACT_CUSTOMER_REQUIRED");
+      const customer = await tx.customer.findFirst({ where: { id: customerId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
+      if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+
+      const currentRows = await tx.$queryRawUnsafe(
+        'SELECT * FROM customer_contacts WHERE id=$1::uuid AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
+        op.entityId, ctx.tenantId, ctx.branchId,
+      );
+      const current = currentRows[0];
+
+      if (op.operationType === "CREATE") {
+        if (current) {
+          if (current.customerId !== customerId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+          return;
+        }
+        if (payload.isPrimary) {
+          await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3', customerId, ctx.tenantId, ctx.branchId);
+        }
+        await tx.$executeRawUnsafe(
+          'INSERT INTO customer_contacts (id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status") VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,\'ACTIVE\')',
+          op.entityId, customerId, ctx.tenantId, ctx.branchId, String(payload.firstName || "").trim(), String(payload.lastName || "").trim(),
+          String(payload.title || "").trim(), String(payload.role || "").trim(), String(payload.department || "").trim(),
+          String(payload.phone || "").trim(), String(payload.email || "").trim(), Boolean(payload.isPrimary), String(payload.notes || ""),
+          String(payload.decisionInfluence || "INFLUENCER"),
+        );
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CONTACT_CREATED", entityType: "CustomerContact", entityId: op.entityId,
+          metadata: { customerId, operationId: op.operationId },
+        }});
         return;
       }
-      throw new Error("PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED");
+
+      if (!current) {
+        if (op.operationType === "DELETE") return;
+        throw new Error("CONTACT_NOT_FOUND");
+      }
+      if (current.customerId !== customerId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+      const base = getBaseUpdatedAt(op.payload);
+      if (base && new Date(current.updatedAt).getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: customer contact changed on server");
+
+      if (op.operationType === "DELETE") {
+        await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1::uuid AND "tenantId"=$2 AND "branchId"=$3', op.entityId, ctx.tenantId, ctx.branchId);
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CONTACT_ARCHIVED", entityType: "CustomerContact", entityId: op.entityId,
+          metadata: { customerId, operationId: op.operationId },
+        }});
+        return;
+      }
+
+      const next = { ...current, ...payload };
+      if (next.isPrimary) {
+        await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3 AND id <> $4', customerId, ctx.tenantId, ctx.branchId, op.entityId);
+      }
+      await tx.$executeRawUnsafe(
+        'UPDATE customer_contacts SET "firstName"=$1,"lastName"=$2,"title"=$3,role=$4,department=$5,"phone"=$6,"email"=$7,"isPrimary"=$8,"notes"=$9,"decisionInfluence"=$10,"status"=$11,"updatedAt"=now() WHERE id=$12::uuid AND "tenantId"=$13 AND "branchId"=$14 AND "customerId"=$15',
+        String(next.firstName || "").trim(), String(next.lastName || "").trim(), String(next.title || "").trim(), String(next.role || "").trim(),
+        String(next.department || "").trim(), String(next.phone || "").trim(), String(next.email || "").trim(), Boolean(next.isPrimary),
+        String(next.notes || ""), String(next.decisionInfluence || "INFLUENCER"), String(next.status || "ACTIVE"),
+        op.entityId, ctx.tenantId, ctx.branchId, customerId,
+      );
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "CONTACT_UPDATED", entityType: "CustomerContact", entityId: op.entityId,
+        metadata: { customerId, operationId: op.operationId, changedFields: Object.keys(payload).filter((k) => k !== "_baseUpdatedAt").sort() },
+      }});
+      return;
     }
 
     if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
@@ -1112,69 +1261,47 @@ const now = new Date();
       return;
     }
 
-    if (op.entityType === "PurchaseReturn" && op.operationType === "CREATE") {
-      const payload: any = stripSyncControlFields(op.payload as any);
-      const existing = await tx.return.findUnique({ where: { id: op.entityId }, include: { lines: true } });
-      if (existing) {
-        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId || existing.originalSaleId !== null) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
-        return;
-      }
-      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
-      if (!supplier || supplier.status !== "ACTIVE") throw new Error("SUPPLIER_NOT_FOUND_OR_INACTIVE");
-      const receipt = await tx.purchaseReceipt.findFirst({ where: { id: payload.purchaseReceiptId, tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true } });
-      if (!receipt || receipt.supplierId !== supplier.id) throw new Error("PURCHASE_RETURN_RECEIPT_INVALID");
-      const items = Array.isArray(payload.items) ? payload.items : [];
-      if (!items.length) throw new Error("PURCHASE_RETURN_LINES_REQUIRED");
-      const source = new Map(receipt.items.map((i: any) => [i.variantId, i]));
-      let total = 0;
-      const lines = items.map((i: any) => {
-        const r: any = source.get(i.variantId);
-        const qty = Number(i.quantityReturned);
-        const unitCost = Number(i.unitCost ?? r?.unitCost ?? 0);
-        if (!r || !(qty > 0) || qty > Number(r.quantityReceived) || unitCost < 0) throw new Error("PURCHASE_RETURN_LINE_INVALID");
-        const lineTotal = qty * unitCost; total += lineTotal;
-        return { id: i.id || randomUUID(), variantId: i.variantId, quantityReturned: qty, refundUnitPrice: unitCost, refundLineTotal: lineTotal, condition: i.condition || "GOOD" };
-      });
-      if (total > Number(supplier.outstandingBalance) + 0.01) throw new Error("PURCHASE_RETURN_EXCEEDS_SUPPLIER_BALANCE");
-      const returnNumber = payload.returnNumber || `PUR-MAIN-RET-${op.operationId.slice(0, 10).toUpperCase()}`;
-      const ret = await tx.return.create({ data: {
-        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, returnNumber, originalSaleId: null, customerId: null,
-        reason: String(payload.reason || "SUPPLIER_RETURN"), refundType: "SUPPLIER_CREDIT", totalRefundAmount: total, status: "COMPLETED", authorizedById: ctx.userId,
-        lines: { create: lines },
-      } });
-      const impacted = new Set<string>();
-      for (const line of lines) {
-        await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`, line.variantId, ctx.tenantId, ctx.branchId);
-        const variant = await tx.productVariant.findUnique({ where: { id: line.variantId } });
-        const agg = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: line.variantId } });
-        const before = Number(agg._sum.quantityChange ?? 0);
-        if (!variant || before < line.quantityReturned) throw new Error("INSUFFICIENT_STOCK_FOR_PURCHASE_RETURN");
-        await tx.stockLedger.create({ data: {
-          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: line.variantId,
-          movementType: "SUPPLIER_RETURN", referenceType: "PURCHASE_RETURN", referenceId: ret.id,
-          quantityBefore: before, quantityChange: -line.quantityReturned, quantity: -line.quantityReturned, quantityAfter: before - line.quantityReturned,
-          unitCost: line.refundUnitPrice, totalCost: -line.refundLineTotal, userId: ctx.userId, deviceId: req.deviceId, operationId: op.operationId,
-          idempotencyKey: `${op.idempotencyKey}-${line.variantId}`, occurredAt: new Date(), notes: payload.reason || "SUPPLIER_RETURN",
-        } });
-        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, line.variantId);
-        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, line.variantId, null);
-        impacted.add(variant.productId);
-      }
-      for (const productId of impacted) await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, productId);
-      await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: total } } });
-      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "PURCHASE_RETURN_SYNCED", entityType: "PurchaseReturn", entityId: ret.id, metadata: { supplierId: supplier.id, purchaseReceiptId: receipt.id, total } } });
-      return;
-    }
-
     if (op.entityType === "Customer" && op.operationType === "CREATE") {
       const existing = await tx.customer.findUnique({ where: { id: op.entityId } });
-      if (!existing) await tx.customer.create({ data: { ...(op.payload as any), id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const created = await tx.customer.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        customerCode: payload.customerCode || `CUST-${op.operationId.slice(0, 10)}`,
+        name: String(payload.name || "").trim(),
+        phone: payload.phone || null, email: payload.email || null, address: payload.address || null,
+        creditLimit: Number(payload.creditLimit || 0), currentBalance: Number(payload.openingBalance || 0), openingBalance: Number(payload.openingBalance || 0),
+        status: payload.status || "ACTIVE",
+      }});
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "CUSTOMER_CREATED", entityType: "Customer", entityId: created.id,
+        metadata: { customerCode: created.customerCode, operationId: op.operationId },
+      }});
       return;
     }
 
     if (op.entityType === "Supplier" && op.operationType === "CREATE") {
       const existing = await tx.supplier.findUnique({ where: { id: op.entityId } });
-      if (!existing) await tx.supplier.create({ data: { ...(op.payload as any), id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const created = await tx.supplier.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        supplierCode: payload.supplierCode || `SUP-${op.operationId.slice(0, 10)}`,
+        name: String(payload.name || "").trim(), phone: payload.phone || null, email: payload.email || null,
+        address: payload.address || null, taxPin: payload.taxPin || null, outstandingBalance: 0, status: payload.status || "ACTIVE",
+      }});
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "SUPPLIER_CREATED", entityType: "Supplier", entityId: created.id,
+        metadata: { supplierCode: created.supplierCode, operationId: op.operationId },
+      }});
       return;
     }
 
@@ -1302,20 +1429,36 @@ const now = new Date();
   }
 
   private async lockConflictEntity(tx: any, ctx: TenantContext, entityType: string, entityId: string): Promise<void> {
-    const tableByType: Record<string, string> = {
-      Product: "products",
-      ProductVariant: "product_variants",
-      Customer: "customers",
-      Supplier: "suppliers",
-      Category: "categories",
-      Brand: "brands",
-      Expense: "expenses",
-    };
-    const table = tableByType[entityType];
-    if (!table) return;
-    const rows = await tx.$queryRawUnsafe(`SELECT id FROM "${table}" WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
-      entityId, ctx.tenantId, ctx.branchId,
-    ) as Array<{ id: string }>;
+    const queryArgs = [entityId, ctx.tenantId, ctx.branchId] as const;
+    let rows: Array<{ id: string }>;
+    switch (entityType) {
+      case "Product":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "products" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "ProductVariant":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "product_variants" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "Customer":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "customers" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "Supplier":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "suppliers" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "Category":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "categories" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "Brand":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "brands" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "Expense":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "expenses" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "CustomerContact":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "customer_contacts" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      default:
+        return;
+    }
     if (!rows.length) throw new Error("SYNC_CONFLICT_ENTITY_NOT_FOUND");
   }
 
@@ -1394,6 +1537,7 @@ const now = new Date();
           Product: ["name", "description", "categoryId", "brandId", "supplierId", "taxId", "category", "isActive"],
           ProductVariant: ["name", "barcode", "attributes", "reorderLevel", "isActive"],
           Customer: ["name", "phone", "email", "address"],
+          CustomerContact: ["firstName", "lastName", "title", "role", "department", "email", "phone", "isPrimary", "decisionInfluence", "notes", "status"],
           Supplier: ["name", "phone", "email", "address", "taxPin"],
           Category: ["name", "code", "parentId", "description", "color", "isActive"],
           Brand: ["name", "code", "origin", "notes", "isActive"],
@@ -1540,9 +1684,9 @@ const now = new Date();
   async listConflicts(ctx: TenantContext, status: string = "OPEN"): Promise<any[]> {
     await this.ensureInfrastructure();
     assertSyncConflictPermission(ctx, "sync.conflict.read");
-    const rows = status === "ALL"
-      ? await prisma.$queryRawUnsafe<any[]>("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId)
-      : await prisma.$queryRawUnsafe<any[]>("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 AND status = $3 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId, status);
+    const rows: any[] = status === "ALL"
+      ? await prisma.$queryRawUnsafe("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId)
+      : await prisma.$queryRawUnsafe("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 AND status = $3 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId, status);
     return rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, branchId: row.branch_id, operationId: row.operation_id, entityType: row.entity_type, entityId: row.entity_id, operationType: row.operation_type, localPayload: row.local_payload, remoteRecord: row.remote_payload, status: row.status, detectedAt: row.created_at, resolvedAt: row.resolved_at }));
   }
 
@@ -1661,6 +1805,10 @@ const now = new Date();
       const adjustments = await tx.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
       const customers = await tx.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
       const suppliers = await tx.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const contacts = await tx.$queryRawUnsafe(
+        'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE "tenantId"=$1 AND "branchId"=$2 ORDER BY "createdAt" ASC',
+        ctx.tenantId, ctx.branchId,
+      );
       const categories = await tx.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
       const brands = await tx.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
       const sales = await tx.sale.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, payments: true }, orderBy: { soldAt: "asc" } });
@@ -1669,11 +1817,7 @@ const now = new Date();
       const priceHistories = await tx.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { effectiveFrom: "asc" } });
       const settings = await tx.setting.findMany({ where: { tenantId: ctx.tenantId, isActive: true, OR: [{ scope: "TENANT" }, { scope: "BRANCH", branchId: ctx.branchId }, { scope: "USER", userId: ctx.userId }] }, orderBy: { updatedAt: "asc" } });
       const expenses = (await tx.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { incurredAt: "asc" } })).map(expenseShape);
-      const stockTransfers = await tx.stockTransfer.findMany({ where: { tenantId: ctx.tenantId, OR: [{ sourceBranchId: ctx.branchId }, { destinationBranchId: ctx.branchId }] }, include: { items: true }, orderBy: { createdAt: "asc" } });
-      const stockCounts = await tx.stockCount.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true }, orderBy: { createdAt: "asc" } });
-      const productBundles = await tx.productBundle.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true }, orderBy: { createdAt: "asc" } });
-      const wastageRecords = await tx.wastageRecord.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
-      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories, settings, expenses, stockTransfers, stockCounts, productBundles, wastageRecords };
+      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, contacts, categories, brands, sales, payments, purchaseReceipts, priceHistories, settings, expenses };
       const entityCounts = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
       return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, syncEpoch, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
     });
@@ -1706,7 +1850,7 @@ const now = new Date();
         if (minRev > 1n && afterRevision < minRev) {
           return {
             serverTimestamp: new Date().toISOString(),
-            products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], syncEpoch,
+            products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], contacts: [], syncEpoch,
             serverRevision: String(afterRevision),
             changes: [],
             requiresBootstrap: true,
@@ -1714,7 +1858,7 @@ const now = new Date();
           } as any;
         }
       }
-      return { serverTimestamp: new Date().toISOString(), products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], syncEpoch, ...( { serverRevision: String(lastDeliveredRevision), changes: normalizedChanges } as any ) } as any;
+      return { serverTimestamp: new Date().toISOString(), products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], contacts: [], syncEpoch, ...( { serverRevision: String(lastDeliveredRevision), changes: normalizedChanges } as any ) } as any;
     }
     const since = new Date(rawSince);
     if (Number.isNaN(since.getTime())) throw new Error("SYNC_PROTOCOL_INVALID: invalid sync cursor");
@@ -1727,13 +1871,13 @@ const now = new Date();
       adjustments: await prisma.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       customers: await prisma.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       suppliers: await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
+      contacts: await prisma.$queryRawUnsafe(
+        'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE "tenantId"=$1 AND "branchId"=$2 AND "updatedAt">=$3 AND "updatedAt"<=$4 ORDER BY "updatedAt" ASC',
+        ctx.tenantId, ctx.branchId, since, anchor,
+      ),
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
-      stockTransfers: await prisma.stockTransfer.findMany({ where: { tenantId: ctx.tenantId, OR: [{ sourceBranchId: ctx.branchId }, { destinationBranchId: ctx.branchId }], updatedAt: { gte: since, lte: anchor } }, include: { items: true }, orderBy: { updatedAt: "asc" } }),
-      stockCounts: await prisma.stockCount.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, include: { items: true }, orderBy: { updatedAt: "asc" } }),
-      productBundles: await prisma.productBundle.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, include: { items: true }, orderBy: { updatedAt: "asc" } }),
-      wastageRecords: await prisma.wastageRecord.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { updatedAt: "asc" } }),
       settings: (await prisma.setting.findMany({
         where: { tenantId: ctx.tenantId, updatedAt: { gte: since, lte: anchor }, OR: [{ scope: "TENANT" }, { scope: "BRANCH", branchId: ctx.branchId }, { scope: "USER", userId: ctx.userId }] },
         orderBy: { updatedAt: "asc" },
@@ -1744,37 +1888,29 @@ const now = new Date();
   }
   async getJournalCompactionStats(ctx?: CompactionScopeContext): Promise<JournalCompactionStats[]> {
     await this.ensureInfrastructure();
-    let query: string;
-    const params: any[] = [];
-
-    if (ctx?.tenantId && ctx?.branchId) {
-      query = `
-        SELECT tenant_id, branch_id,
-               COUNT(*)::text AS total_entries,
-               MIN(revision)::text AS min_revision,
-               MAX(revision)::text AS max_revision,
-               MIN(created_at)::text AS oldest_entry_date,
-               MAX(created_at)::text AS newest_entry_date
-          FROM sync_change_journal
-         WHERE tenant_id = $1 AND branch_id = $2
-         GROUP BY tenant_id, branch_id
-      `;
-      params.push(ctx.tenantId, ctx.branchId);
-    } else {
-      query = `
-        SELECT tenant_id, branch_id,
-               COUNT(*)::text AS total_entries,
-               MIN(revision)::text AS min_revision,
-               MAX(revision)::text AS max_revision,
-               MIN(created_at)::text AS oldest_entry_date,
-               MAX(created_at)::text AS newest_entry_date
-          FROM sync_change_journal
-         GROUP BY tenant_id, branch_id
-         ORDER BY tenant_id, branch_id
-      `;
-    }
-
-    const rows = await prisma.$queryRawUnsafe<any[]>(query, ...params);
+    const rows: any[] = (ctx?.tenantId && ctx?.branchId)
+      ? await prisma.$queryRaw<any[]>`
+          SELECT tenant_id, branch_id,
+                 COUNT(*)::text AS total_entries,
+                 MIN(revision)::text AS min_revision,
+                 MAX(revision)::text AS max_revision,
+                 MIN(created_at)::text AS oldest_entry_date,
+                 MAX(created_at)::text AS newest_entry_date
+            FROM sync_change_journal
+           WHERE tenant_id = ${ctx.tenantId} AND branch_id = ${ctx.branchId}
+           GROUP BY tenant_id, branch_id
+        `
+      : await prisma.$queryRaw<any[]>`
+          SELECT tenant_id, branch_id,
+                 COUNT(*)::text AS total_entries,
+                 MIN(revision)::text AS min_revision,
+                 MAX(revision)::text AS max_revision,
+                 MIN(created_at)::text AS oldest_entry_date,
+                 MAX(created_at)::text AS newest_entry_date
+            FROM sync_change_journal
+           GROUP BY tenant_id, branch_id
+           ORDER BY tenant_id, branch_id
+        `;
     return rows.map((r) => ({
       tenantId: r.tenant_id,
       branchId: r.branch_id,
@@ -1834,23 +1970,45 @@ const now = new Date();
       };
     }
 
-    let deleteSql = `FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3`;
-    const params: any[] = [ctx.tenantId, ctx.branchId, safeRevision];
+    const cutoffDate = typeof maxAgeDays === "number" && maxAgeDays > 0
+      ? new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000)
+      : null;
 
-    if (typeof maxAgeDays === "number" && maxAgeDays > 0) {
-      const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
-      deleteSql += ` AND created_at < $4`;
-      params.push(cutoffDate);
-    }
-
-    const countRows = await prisma.$queryRawUnsafe<Array<{ count: string | bigint | number }>>(
-      `SELECT COUNT(*)::text AS count ${deleteSql}`,
-      ...params,
-    );
+    const countRows = cutoffDate
+      ? await prisma.$queryRaw<Array<{ count: string | bigint | number }>>`
+          SELECT COUNT(*)::text AS count
+            FROM sync_change_journal
+           WHERE tenant_id = ${ctx.tenantId}
+             AND branch_id = ${ctx.branchId}
+             AND revision < ${safeRevision}
+             AND created_at < ${cutoffDate}
+        `
+      : await prisma.$queryRaw<Array<{ count: string | bigint | number }>>`
+          SELECT COUNT(*)::text AS count
+            FROM sync_change_journal
+           WHERE tenant_id = ${ctx.tenantId}
+             AND branch_id = ${ctx.branchId}
+             AND revision < ${safeRevision}
+        `;
     const prunedCount = Number(countRows[0]?.count || 0);
 
     if (!dryRun && prunedCount > 0) {
-      await prisma.$executeRawUnsafe(`DELETE ${deleteSql}`, ...params);
+      if (cutoffDate) {
+        await prisma.$executeRaw`
+          DELETE FROM sync_change_journal
+           WHERE tenant_id = ${ctx.tenantId}
+             AND branch_id = ${ctx.branchId}
+             AND revision < ${safeRevision}
+             AND created_at < ${cutoffDate}
+        `;
+      } else {
+        await prisma.$executeRaw`
+          DELETE FROM sync_change_journal
+           WHERE tenant_id = ${ctx.tenantId}
+             AND branch_id = ${ctx.branchId}
+             AND revision < ${safeRevision}
+        `;
+      }
     }
 
     return {

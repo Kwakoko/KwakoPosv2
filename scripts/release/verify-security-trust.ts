@@ -21,11 +21,15 @@ export function runSecurityTrustVerification(cwd = process.cwd()) {
 
   const api = read("apps/api/src/server.ts");
   checks.push({ name: "tenant-trusted-context", passed: /function requireTenantContext/.test(api) && /Cross-tenant access denied/.test(api), detail: "tenant context and cross-tenant denial present" });
-  checks.push({ name: "production-cors-hardening", passed: /H-007: Hardened CORS configuration/.test(api) && /CORS_ORIGIN/.test(api), detail: "production CORS is explicitly configured" });
+  checks.push({ name: "production-cors-hardening", passed: /H-007: Hardened CORS configuration/.test(api) && /CORS_ORIGIN/.test(api) && !/:\s*["']\*["']/.test(api) && /origin\.startsWith\("https:\/\/"\)/.test(api), detail: "CORS uses explicit HTTPS origins in production" });
+  const securityMiddleware = read("apps/api/src/middleware/securityMiddleware.ts");
+  const auth = read("packages/auth/src/index.ts");
+  checks.push({ name: "csp-script-hardening", passed: /scriptSrc:\s*\["'self'"\]/.test(securityMiddleware) && !securityMiddleware.includes('scriptSrc: ["\'self\'", "\'unsafe-inline\'"]'), detail: "production CSP does not allow inline scripts" });
+  checks.push({ name: "csrf-origin-guard", passed: /CSRF_ORIGIN_DENIED/.test(securityMiddleware) && /SameSite=Strict/.test(api), detail: "cookie-auth mutations enforce approved Origin with SameSite=Strict cookies" });
+  checks.push({ name: "jwt-default-privilege-fail-closed", passed: !auth.includes('permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"]') && !auth.includes('roles: payload.roles && payload.roles.length ? payload.roles : ["ADMIN"]'), detail: "access-token generator never invents privileged claims" });
   checks.push({ name: "auth-rate-limits", passed: /\/auth\/login[\s\S]{0,180}rateLimit/.test(api) && /\/auth\/refresh[\s\S]{0,180}rateLimit/.test(api), detail: "login and refresh are rate limited" });
   checks.push({ name: "audit-stream", passed: /ProductionAuditStream\.record/.test(api), detail: "security-sensitive operations emit audit events" });
 
-  const auth = read("packages/auth/src/index.ts");
   checks.push({ name: "jwt-secret-runtime-guard", passed: /JWT_SECRET environment variable is MANDATORY in production/.test(auth) && /verifyAccessToken/.test(auth), detail: "JWT secret and verification guards exist" });
 
   const claims = KWAKOKO_SECURITY_TRUST_GOVERNANCE.invariants.join(" ");

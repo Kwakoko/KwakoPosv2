@@ -91,7 +91,7 @@ async function runLiveSecurityCases(): Promise<Map<string, Result>> {
   const missing = required.filter(([, value]) => !value).map(([name]) => name);
   if (missing.length) {
     const message = `set ${missing.join(", ")} to execute live authentication/API penetration checks`;
-    for (const id of ["SEC-AUTH-01", "SEC-AUTH-02", "SEC-AUTH-05", "SEC-SES-02", "SEC-SES-03", "SEC-RBAC-03", "SEC-RBAC-05", "SEC-TEN-02", "SEC-TEN-03", "SEC-BR-02", "SEC-API-01", "SEC-API-02"]) {
+    for (const id of ["SEC-AUTH-01", "SEC-AUTH-02", "SEC-AUTH-05", "SEC-SES-02", "SEC-SES-03", "SEC-RBAC-03", "SEC-RBAC-05", "SEC-TEN-02", "SEC-TEN-03", "SEC-BR-02", "SEC-API-01", "SEC-API-02", "SEC-CSRF-01", "SEC-HDR-01"]) {
       results.set(id, blocked(message));
     }
     return results;
@@ -156,6 +156,27 @@ async function runLiveSecurityCases(): Promise<Map<string, Result>> {
       results.set("SEC-RBAC-03", blocked("valid test login did not return an access token"));
     }
 
+    const hostileOriginRefresh = await liveRequest(baseUrl, "/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+      headers: {
+        ...(setCookie ? { Cookie: setCookie.split(",")[0] } : {}),
+        Origin: "https://evil.example",
+      },
+    });
+    results.set("SEC-CSRF-01", {
+      passed: hostileOriginRefresh.status === 403,
+      details: `Hostile Origin refresh request returned HTTP ${hostileOriginRefresh.status}`,
+    });
+
+    const health = await liveRequest(baseUrl, "/health");
+    const csp = health.headers.get("content-security-policy") || "";
+    const xFrame = health.headers.get("x-frame-options") || "";
+    results.set("SEC-HDR-01", {
+      passed: !csp.includes("script-src 'self' 'unsafe-inline'") && xFrame.toLowerCase() === "deny",
+      details: `Security headers: CSP inline-script allowance=${csp.includes("script-src 'self' 'unsafe-inline'")}; X-Frame-Options=${xFrame || "missing"}`,
+    });
+
     const refresh = await liveRequest(baseUrl, "/auth/refresh", {
       method: "POST",
       body: JSON.stringify({ sessionId, }),
@@ -189,7 +210,7 @@ async function runLiveSecurityCases(): Promise<Map<string, Result>> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    for (const id of ["SEC-AUTH-01", "SEC-AUTH-02", "SEC-AUTH-05", "SEC-SES-02", "SEC-SES-03", "SEC-RBAC-03", "SEC-RBAC-05", "SEC-API-01"]) {
+    for (const id of ["SEC-AUTH-01", "SEC-AUTH-02", "SEC-AUTH-05", "SEC-SES-02", "SEC-SES-03", "SEC-RBAC-03", "SEC-RBAC-05", "SEC-API-01", "SEC-CSRF-01", "SEC-HDR-01"]) {
       results.set(id, blocked(`live target request failed: ${message}`));
     }
   }
@@ -217,6 +238,14 @@ export async function runSecurityAcceptanceTestSuite(): Promise<SecuritySuiteRep
     {
       id: "SEC-AUTH-05", priority: "P0", category: "Authentication Integrity", title: "JWT Integrity / Tampering",
       run: async () => live.get("SEC-AUTH-05") || blocked("live JWT tampering test did not execute"),
+    },
+    {
+      id: "SEC-CSRF-01", priority: "P0", category: "CSRF / CORS", title: "Hostile Origin Cookie Mutation",
+      run: async () => live.get("SEC-CSRF-01") || blocked("live CSRF origin test did not execute"),
+    },
+    {
+      id: "SEC-HDR-01", priority: "P1", category: "Security Headers", title: "CSP / Clickjacking Headers",
+      run: async () => live.get("SEC-HDR-01") || blocked("live security-header test did not execute"),
     },
     {
       id: "SEC-AUTH-06", priority: "P0", category: "Authentication Integrity", title: "Zero Demo Auth Data",

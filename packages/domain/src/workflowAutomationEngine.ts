@@ -67,6 +67,7 @@ export class WorkflowAutomationEngine {
   private definitions = new Map<string, WorkflowDefinition>();
   private instances = new Map<string, WorkflowInstanceExecution>();
   private pendingTasks = new Map<string, WorkflowTaskAssignment>();
+  private taskTenants = new Map<string, string>();
   private approvalIndexes = new Map<string, number>();
   private eventPayloads = new Map<string, Record<string, unknown>>();
   private actionHandlers = new Map<string, ActionHandler>();
@@ -181,6 +182,8 @@ export class WorkflowAutomationEngine {
       createdAt: now(),
     };
     this.pendingTasks.set(taskId, task);
+    const tenantId = this.eventPayloads.get(instance.instanceId)?.tenantId;
+    if (typeof tenantId === "string" && tenantId.trim()) this.taskTenants.set(taskId, tenantId.trim());
     instance.currentStep = requirement.stepId;
     instance.logs.push(`Approval task ${taskId} assigned to role ${requirement.approverRole}`);
     return task;
@@ -215,9 +218,11 @@ export class WorkflowAutomationEngine {
     }
   }
 
-  public decideApprovalTask(taskId: string, decision: "APPROVED" | "REJECTED", approverId: string): boolean {
+  public decideApprovalTask(taskId: string, decision: "APPROVED" | "REJECTED", approverId: string, tenantId?: string): boolean {
     const task = this.pendingTasks.get(taskId);
+    const taskTenant = this.taskTenants.get(taskId);
     if (!task || task.status !== "PENDING" || !approverId.trim()) return false;
+    if (tenantId && taskTenant !== tenantId) return false;
 
     task.status = decision;
     const instance = this.instances.get(task.instanceId);

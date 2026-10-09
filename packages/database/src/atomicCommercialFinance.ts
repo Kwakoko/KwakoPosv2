@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
-import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering, calculateAvailableStock } from "@kwakopos2/domain";
+import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering, assertBackdatingThreshold, assertSaleBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
+import { PricingAuthority } from "./pricingAuthority.js";
+import { resolveBundleDefinition } from "./bundleInventory.js";
 
 export class PrismaAtomicCommercialFinanceService {
   constructor(private readonly db: any = prisma) {}
 
-  private async accounts(tx: any, ctx: TenantContext) {
+  async accounts(tx: any, ctx: TenantContext) {
     const codes = [
       ["1110", "Cash", "ASSET", "CASH"], ["1210", "Bank", "ASSET", "BANK"],
       ["1310", "Accounts Receivable", "ASSET", "ACCOUNTS_RECEIVABLE"], ["1410", "Inventory", "ASSET", "INVENTORY"],
@@ -24,7 +26,7 @@ export class PrismaAtomicCommercialFinanceService {
     return { cashAccountId: result["1110"], bankAccountId: result["1210"], receivableAccountId: result["1310"], inventoryAccountId: result["1410"], payableAccountId: result["2110"], taxPayableAccountId: result["2210"], salesRevenueAccountId: result["4100"], salesDiscountAccountId: result["4900"], cogsAccountId: result["5100"], expenseDefaultAccountId: result["6900"], cashVarianceAccountId: result["8100"] };
   }
 
-  private async writeJournal(tx: any, ctx: TenantContext, built: any) {
+  async writeJournal(tx: any, ctx: TenantContext, built: any) {
     const existing = await tx.journalEntry.findUnique({ where: { idempotencyKey: built.journal.idempotencyKey } }).catch(() => null);
     if (existing) {
       const lines = await tx.journalLine.findMany({ where: { journalEntryId: existing.id } });
@@ -57,177 +59,6 @@ export class PrismaAtomicCommercialFinanceService {
     return { journal: j, lines };
   }
 
-  public async getFinancialAccountLookup(ctx: TenantContext, tx: any = this.db) {
-    return this.accounts(tx, ctx);
-  }
-
-  public async postFinancialJournal(ctx: TenantContext, built: any, tx: any = this.db) {
-    return this.writeJournal(tx, ctx, built);
-  }
-
-  async reversePayment(ctx: TenantContext, paymentId: string, reason: string) {
-    return this.db.$transaction((tx: any) => this.reversePaymentInTransaction(ctx, paymentId, reason, tx));
-  }
-
-  async reversePaymentInTransaction(ctx: TenantContext, paymentId: string, reason: string, tx: any) {
-    const payment = await tx.payment.findUnique({ where: { id: paymentId } });
-    if (!payment || payment.tenantId !== ctx.tenantId || payment.branchId !== ctx.branchId) throw new Error("PAYMENT_NOT_FOUND");
-    if (payment.saleId) throw new Error("PAYMENT_SALE_REVERSAL_REQUIRES_RETURN");
-    if (payment.isRefund) throw new Error("PAYMENT_REFUND_CANNOT_BE_REVERSED");
-    if (payment.status !== "COMPLETED") throw new Error("PAYMENT_NOT_REVERSIBLE");
-    const existing = await tx.payment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, reversalOfPaymentId: payment.id } });
-    if (existing) return existing;
-
-    const journal = await tx.journalEntry.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, sourceType: "PAYMENT", sourceId: payment.id, status: "POSTED" }, include: { lines: true } });
-    if (!journal) throw new Error("PAYMENT_JOURNAL_REQUIRED_FOR_REVERSAL");
-    const journalNumber = TransactionNumbering.formatNumber("REV", "MAIN", (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
-    const built = AccountingEngine.createReversalJournal(ctx, journal as any, journal.lines as any, reason, journalNumber);
-    await this.writeJournal(tx, ctx, { journal: built.reversalJournal, lines: built.reversalLines });
-
-    await tx.payment.update({
-      where: { id: payment.id },
-      data: { status: "REVERSED", reversalReason: reason, reversedAt: new Date(), reversedById: ctx.userId },
-    });
-    const reversal = await tx.payment.create({
-      data: {
-        id: crypto.randomUUID(),
-        tenantId: ctx.tenantId,
-        branchId: ctx.branchId,
-        paymentNumber: `REV-PAY-${crypto.randomUUID().slice(0, 12).toUpperCase()}`,
-        saleId: null,
-        purchaseReceiptId: payment.purchaseReceiptId,
-        customerId: payment.customerId,
-        supplierId: payment.supplierId,
-        amount: payment.amount,
-        paymentMethod: payment.paymentMethod,
-        provider: payment.provider,
-        providerReference: payment.providerReference,
-        status: "REVERSED",
-        reconciliationStatus: "MATCHED",
-        reversalOfPaymentId: payment.id,
-        reversalReason: reason,
-        reversedAt: new Date(),
-        reversedById: ctx.userId,
-        paidAt: new Date(),
-      },
-    });
-    await tx.auditEvent.create({
-      data: {
-        id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
-        deviceId: "payments-reversal", action: "PAYMENT_REVERSED", entityType: "Payment", entityId: payment.id,
-        metadata: { reversalPaymentId: reversal.id, amount: Number(payment.amount), reason },
-      },
-    });
-    return reversal;
-  }
-
-  async refundPayment(ctx: TenantContext, paymentId: string, req: any) {
-    return this.db.$transaction((tx: any) => this.refundPaymentInTransaction(ctx, paymentId, req, tx));
-  }
-
-  async refundPaymentInTransaction(ctx: TenantContext, paymentId: string, req: any, tx: any) {
-    const payment = await tx.payment.findUnique({ where: { id: paymentId } });
-    if (!payment || payment.tenantId !== ctx.tenantId || payment.branchId !== ctx.branchId) throw new Error("PAYMENT_NOT_FOUND");
-    if (payment.isRefund) throw new Error("PAYMENT_REFUND_CANNOT_BE_REFUNDED");
-    if (payment.saleId) throw new Error("PAYMENT_SALE_REFUND_REQUIRES_RETURN");
-    if (!["COMPLETED", "PARTIALLY_REFUNDED"].includes(payment.status)) throw new Error("PAYMENT_NOT_REFUNDABLE");
-    const refundAmount = Number(req.amount);
-    const remaining = Number(payment.amount) - Number(payment.refundedAmount || 0);
-    if (!(refundAmount > 0) || refundAmount > remaining + 0.01) throw new Error("REFUND_EXCEEDS_REMAINING_PAYMENT");
-
-    const accounts = await this.accounts(tx, ctx);
-    const journalNumber = TransactionNumbering.formatNumber("REV", "MAIN", (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
-    const isBank = ["BANK", "MOBILE_MONEY", "CARD"].includes(payment.paymentMethod);
-    const refundDebit = payment.customerId ? accounts.receivableAccountId : accounts.payableAccountId;
-    const refundCredit = isBank ? accounts.bankAccountId : accounts.cashAccountId;
-    const lines = payment.customerId
-      ? [
-          { accountId: refundDebit, description: `Payment Refund ${payment.paymentNumber} - AR Restoration`, debit: refundAmount, credit: 0 },
-          { accountId: refundCredit, description: `Payment Refund ${payment.paymentNumber} - Funds Outflow`, debit: 0, credit: refundAmount },
-        ]
-      : [
-          { accountId: refundCredit, description: `Supplier Payment Refund ${payment.paymentNumber} - Funds Inflow`, debit: refundAmount, credit: 0 },
-          { accountId: refundDebit, description: `Supplier Payment Refund ${payment.paymentNumber} - AP Restoration`, debit: 0, credit: refundAmount },
-        ];
-    const built = AccountingEngine.createJournalEntry(ctx, {
-      journalNumber,
-      sourceType: "PAYMENT",
-      sourceId: payment.id,
-      description: `Payment Refund ${payment.paymentNumber}`,
-      idempotencyKey: `jrn-refund-pay-${payment.id}-${req.idempotencyKey}`,
-      lines,
-    });
-    await this.writeJournal(tx, ctx, built);
-
-    const newRefunded = Number(payment.refundedAmount || 0) + refundAmount;
-    const status = newRefunded + 0.01 >= Number(payment.amount) ? "REFUNDED" : "PARTIALLY_REFUNDED";
-    const refund = await tx.payment.create({
-      data: {
-        id: crypto.randomUUID(),
-        tenantId: ctx.tenantId,
-        branchId: ctx.branchId,
-        paymentNumber: `REF-PAY-${crypto.randomUUID().slice(0, 12).toUpperCase()}`,
-        customerId: payment.customerId,
-        supplierId: payment.supplierId,
-        amount: refundAmount,
-        paymentMethod: req.refundMethod || payment.paymentMethod,
-        provider: req.provider || payment.provider || null,
-        providerReference: req.providerReference || null,
-        status: "REFUNDED",
-        isRefund: true,
-        refundReason: req.reason,
-        refundMethod: req.refundMethod || payment.paymentMethod,
-        refundProvider: req.provider || null,
-        refundProviderReference: req.providerReference || null,
-        reversalOfPaymentId: payment.id,
-        reconciliationStatus: "MATCHED",
-        paidAt: new Date(),
-      },
-    });
-    await tx.payment.update({
-      where: { id: payment.id },
-      data: { refundedAmount: newRefunded, status, refundReason: req.reason, refundMethod: req.refundMethod || payment.paymentMethod, refundProvider: req.provider || payment.provider || null, refundProviderReference: req.providerReference || null },
-    });
-    await tx.auditEvent.create({
-      data: {
-        id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
-        deviceId: "payments-refund", action: "PAYMENT_REFUNDED", entityType: "Payment", entityId: payment.id,
-        metadata: { refundPaymentId: refund.id, amount: refundAmount, reason: req.reason, remainingAfter: Math.max(0, Number(payment.amount) - newRefunded) },
-      },
-    });
-    return refund;
-  }
-
-  async confirmProviderPaymentInTransaction(ctx: TenantContext, paymentId: string, req: any, tx: any) {
-    const payment = await tx.payment.findUnique({ where: { id: paymentId } });
-    if (!payment || payment.tenantId !== ctx.tenantId || payment.branchId !== ctx.branchId) throw new Error("PAYMENT_NOT_FOUND");
-    if (!["PENDING", "COMPLETED"].includes(payment.status) || payment.isRefund || payment.reversalOfPaymentId) throw new Error("PAYMENT_PROVIDER_CONFIRMATION_INVALID_STATE");
-    if (Math.abs(Number(req.amount) - Number(payment.amount)) > 0.01) throw new Error("PAYMENT_PROVIDER_AMOUNT_MISMATCH");
-    const duplicate = await tx.payment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, providerEventId: req.providerEventId } });
-    if (duplicate && duplicate.id !== payment.id) throw new Error("PAYMENT_PROVIDER_EVENT_REPLAY");
-    const updated = await tx.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: "COMPLETED",
-        provider: req.provider || payment.provider,
-        providerReference: req.providerReference || payment.providerReference,
-        providerEventId: req.providerEventId,
-        providerVerifiedAt: new Date(),
-        reconciliationStatus: "MATCHED",
-        reconciliationReference: req.externalReference || req.providerEventId,
-        reconciledAt: new Date(),
-      },
-    });
-    await tx.auditEvent.create({
-      data: {
-        id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
-        deviceId: "payment-provider", action: "PAYMENT_PROVIDER_CONFIRMED", entityType: "Payment", entityId: payment.id,
-        metadata: { provider: updated.provider, providerReference: updated.providerReference, providerEventId: req.providerEventId, amount: Number(updated.amount) },
-      },
-    });
-    return updated;
-  }
-
   async createSale(ctx: TenantContext, req: any) {
     return this.db.$transaction(async (tx: any) => {
       const existing = await tx.sale.findUnique({ where: { idempotencyKey: req.idempotencyKey }, include: { lines: true, payments: true } });
@@ -251,13 +82,75 @@ export class PrismaAtomicCommercialFinanceService {
         }
         return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }), drawerOperations };
       }
+      const pricingEvidence: any[] = [];
       const variantProductIds = new Map<string, string>();
+      const variantPrices = new Map<string, number>();
+      const variantCosts = new Map<string, number>();
+      const bundleResolutions = new Map<string, Awaited<ReturnType<typeof resolveBundleDefinition>>>();
+      let saleDiscountRequested = Number(req.discountTotal || 0) > 0;
       for (const item of req.items) {
         const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
         if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || (item.productId !== undefined && v.productId !== item.productId) || v.isActive === false) {
           throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         }
+        const pricingResolution = await PricingAuthority.resolveUnitPrice(tx, ctx, {
+          variantId: item.variantId,
+          productId: item.productId,
+          customerId: req.customerId,
+          quantity: Number(item.quantity),
+          requestedUnitPrice: Number(item.unitPrice),
+          priceListId: req.priceListId,
+          priceOverrideReason: req.priceOverrideReason,
+        });
+        const authoritativePrice = pricingResolution.unitPrice;
+        pricingEvidence.push({
+          variantId: pricingResolution.variantId,
+          productId: pricingResolution.productId,
+          source: pricingResolution.source,
+          sourceId: pricingResolution.sourceId ?? null,
+          customerPriceId: pricingResolution.customerPriceId ?? null,
+          priceListItemId: pricingResolution.priceListItemId ?? null,
+          pricingTierId: pricingResolution.pricingTierId ?? null,
+          promotionId: pricingResolution.promotionId ?? null,
+          promotionalBasePrice: pricingResolution.promotionalBasePrice ?? null,
+          resolvedUnitPrice: pricingResolution.unitPrice,
+          requestedUnitPrice: pricingResolution.requestedUnitPrice ?? null,
+          overrideApplied: pricingResolution.overrideApplied,
+          overrideReason: pricingResolution.overrideReason ?? null,
+        });
+        if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
+        const resolution = bundleResolutions.get(item.variantId) || await resolveBundleDefinition(tx, ctx.tenantId, ctx.branchId, item.variantId);
+        if (resolution.isBundle && item.bundleDefinitionVersion) {
+          const serverDefinitionVersion = resolution.definitionVersion;
+          if (String(item.bundleDefinitionVersion) !== String(serverDefinitionVersion)) {
+            throw new Error("BUNDLE_DEFINITION_CHANGED_OFFLINE");
+          }
+        }
+        if (resolution.isBundle && item.bundleComponents) {
+          const expected = resolution.components.map((component) => ({
+            variantId: component.variantId,
+            productId: component.productId,
+            quantity: component.quantity,
+          }));
+          const actual = item.bundleComponents.map((component: any) => ({
+            variantId: String(component.variantId),
+            productId: String(component.productId),
+            quantity: Number(component.quantity),
+          }));
+          if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+            throw new Error("BUNDLE_DEFINITION_CHANGED_OFFLINE");
+          }
+        }
+        bundleResolutions.set(item.variantId, resolution);
         variantProductIds.set(item.variantId, v.productId);
+        variantPrices.set(item.variantId, authoritativePrice);
+        variantCosts.set(item.variantId, resolution.unitCost);
+      }
+      if (saleDiscountRequested) {
+        const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
+        const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+        const allowed = permissions.includes("*") || permissions.includes("discount.manage") || permissions.includes("sales.discount") || roles.some((r: string) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN","MANAGER","BRANCH_MANAGER"].includes(r));
+        if (!allowed) throw new Error("DISCOUNT_MANAGE_REQUIRED");
       }
       // Resolve tax from the authoritative tenant/branch Settings row. Client tax values are
       // informational only; production financial fields must be derived server-side.
@@ -274,16 +167,47 @@ export class PrismaAtomicCommercialFinanceService {
       });
       const taxConfigRow = (taxSettingRows[0]?.value || {}) as any;
       const taxEnabled = Boolean(taxConfigRow.vatEnabled);
-      const configuredTaxRate = Number(taxConfigRow.vatRatePercent ?? 0);
+      let authoritativeTax: any = null;
+      if (taxEnabled) {
+        const taxId = typeof taxConfigRow.taxId === "string" ? taxConfigRow.taxId : "";
+        authoritativeTax = taxId
+          ? await tx.tax.findFirst({
+              where: { id: taxId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true },
+            })
+          : null;
+        const taxCode = String(taxConfigRow.taxCode || "VAT").trim().toUpperCase();
+        if (!authoritativeTax) {
+          authoritativeTax = await tx.tax.findFirst({
+            where: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: taxCode, isActive: true },
+          });
+        }
+        if (!authoritativeTax) {
+          const rate = Number(taxConfigRow.vatRatePercent ?? 0);
+          if (!Number.isFinite(rate) || rate < 0 || rate > 100) throw new Error("SALE_TAX_RATE_INVALID");
+          authoritativeTax = await tx.tax.upsert({
+            where: { tenantId_branchId_code: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: taxCode } },
+            create: {
+              id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+              name: String(taxConfigRow.taxName || "VAT"), code: taxCode, rate,
+              isInclusive: taxConfigRow.taxInclusivePricing !== false, isActive: true,
+            },
+            update: {
+              name: String(taxConfigRow.taxName || "VAT"), rate,
+              isInclusive: taxConfigRow.taxInclusivePricing !== false, isActive: true,
+            },
+          });
+        }
+      }
+      const configuredTaxRate = authoritativeTax ? Number(authoritativeTax.rate) : 0;
       const taxConfig = {
         ratePct: Number.isFinite(configuredTaxRate) && configuredTaxRate >= 0 && taxEnabled ? configuredTaxRate : 0,
-        isInclusive: taxConfigRow.taxInclusivePricing !== false,
+        isInclusive: authoritativeTax ? Boolean(authoritativeTax.isInclusive) : true,
       };
 
       const lines = req.items.map((item: any) => {
         const c = PricingTaxEngine.calculateLineItem({
-          unitPrice: item.unitPrice,
-          unitCost: item.unitCost || 0,
+          unitPrice: Number(variantPrices.get(item.variantId) ?? item.unitPrice),
+          unitCost: Number(variantCosts.get(item.variantId) ?? 0),
           quantity: item.quantity,
           discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined,
           taxConfig,
@@ -308,9 +232,25 @@ export class PrismaAtomicCommercialFinanceService {
           taxAmount: l.taxAmount,
         })),
         req.discountTotal || 0,
+        taxConfig,
       );
+      if (Number(totals.grandTotal) <= 0) throw new Error("SALE_TOTAL_ZERO");
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
-      const saleNumber = `SAL-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+      const occurredAt = req.occurredAt ? new Date(req.occurredAt) : now;
+      const isBackdated = Boolean(req.isBackdated || (req.occurredAt && Math.abs(now.getTime() - occurredAt.getTime()) > 5 * 60 * 1000));
+      if (req.isBackdated && !req.occurredAt) throw new Error("BACKDATED_SALE_DATE_REQUIRED");
+      if (isBackdated) {
+        assertSaleBackdatingPermission(ctx);
+        assertBackdatingThreshold(occurredAt);
+        const closedPeriod = await tx.accountingPeriod.findFirst({
+          where: { tenantId: ctx.tenantId, startDate: { lte: occurredAt }, endDate: { gte: occurredAt }, status: { in: ["CLOSED", "LOCKED"] } },
+        });
+        if (closedPeriod) {
+          const code = closedPeriod.status === "LOCKED" ? "ACCOUNTING_PERIOD_LOCKED" : "ACCOUNTING_PERIOD_CLOSED";
+          throw new Error(`${code}: Cannot backdate sale into accounting period "${closedPeriod.name}".`);
+        }
+      }
+      const saleNumber = `SAL-${occurredAt.toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const payments: any[] = [];
       for (const p of req.payments || []) {
         let customerCreditLimit: number | undefined;
@@ -334,23 +274,8 @@ export class PrismaAtomicCommercialFinanceService {
           customerCurrentBalance,
         });
         if (!r.success) throw new Error(r.error || "PAYMENT_REJECTED");
-        payments.push({
-          id: crypto.randomUUID(),
-          tenantId: ctx.tenantId,
-          branchId: ctx.branchId,
-          paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
-          amount: p.amount,
-          paymentMethod: p.paymentMethod,
-          provider: p.provider ?? null,
-          providerReference: r.reference,
-          providerVerifiedAt: p.paymentMethod === "CASH" || p.providerReference ? now : null,
-          reconciliationStatus: p.paymentMethod === "CASH" || p.providerReference ? "MATCHED" : "UNRECONCILED",
-          reconciliationReference: p.providerReference ?? null,
-          status: "COMPLETED",
-          paidAt: now,
-        }); }
+        payments.push({ id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider ?? null, providerReference: r.reference, status: "COMPLETED", paidAt: occurredAt }); }
       const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-      if (totalPaid > Number(totals.grandTotal) + 0.005) throw new Error("PAYMENT_OVERPAYMENT");
       if (totalPaid + 0.005 < totals.grandTotal) throw new Error("PAYMENT_UNDERPAYMENT");
       if (payments.some((p) => p.paymentMethod === "CASH")) {
         if (!req.cashSessionId) throw new Error("CASH_SESSION_REQUIRED");
@@ -362,42 +287,31 @@ export class PrismaAtomicCommercialFinanceService {
       const paymentStatus = PaymentEngine.evaluateSalePaymentStatus(totals.grandTotal, payments.map((p) => ({ amount: p.amount, status: p.status }))).paymentStatus;
       if (paymentStatus !== "PAID") throw new Error("PAYMENT_NOT_SETTLED");
 
-      // Validate inventory before persisting the sale. Variant rows are locked for this transaction,
-      // and the remaining-stock map handles duplicate lines for the same variant.
-      const remainingStockByVariant = new Map<string, number>();
-      for (const item of lines) {
-        if (remainingStockByVariant.has(item.variantId)) continue;
-        if (typeof (tx as any).$queryRawUnsafe === "function") {
-          const lockRows = await (tx as any).$queryRawUnsafe(
-            `SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
-            item.variantId,
-            ctx.tenantId,
-            ctx.branchId,
-          ) as Array<{ id: string }>;
-          if (!lockRows.length) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
-        }
-        const ledgerRows = await tx.stockLedger.findMany({
-          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: item.variantId },
-          orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }],
-        });
-        const available = calculateAvailableStock(ledgerRows as any);
-        remainingStockByVariant.set(item.variantId, available);
-      }
-      for (const item of lines) {
-        const requested = Math.abs(item.quantity);
-        const available = remainingStockByVariant.get(item.variantId) ?? 0;
-        if (available < requested) {
-          throw new Error(
-            `INSUFFICIENT_STOCK: Cannot sell ${requested} units of variant ${item.variantId}; only ${available} available.`
-          );
-        }
-        // Keep remainingStockByVariant unchanged until the inventory write loop.
-      }
-
       const netRevenueBeforeTax = Math.max(0, Number(totals.grandTotal) - Number(totals.taxTotal));
       const authoritativeGrossProfit = Number((netRevenueBeforeTax - Number(totals.totalCost)).toFixed(2));
-      const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: netRevenueBeforeTax, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: authoritativeGrossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: now, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
+      const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: netRevenueBeforeTax, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: authoritativeGrossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: occurredAt, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
 
+      if (payments.some((p: any) => p.paymentMethod === "CREDIT") && req.customerId) {
+        await tx.customer.update({ where: { id: req.customerId }, data: { currentBalance: { increment: Number(sale.grandTotal) } } });
+      }
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId,
+          action: "SALE_CREATED", entityType: "Sale", entityId: sale.id,
+          metadata: {
+            operationId: req.operationId,
+            idempotencyKey: req.idempotencyKey,
+            soldAt: occurredAt.toISOString(),
+            isBackdated,
+            pricing: pricingEvidence,
+            pricingPolicy: {
+              precedence: ["CUSTOMER","PROMOTION","WHOLESALE","BULK","BRANCH","PRICE_LIST","BASE"],
+              taxRatePct: taxConfig.ratePct,
+              taxInclusive: taxConfig.isInclusive,
+            },
+          },
+        },
+      });
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
       const drawerOperations: any[] = [];
       const salePayments = Array.isArray(sale.payments) ? sale.payments : payments;
@@ -412,48 +326,153 @@ export class PrismaAtomicCommercialFinanceService {
         drawerOperations.push(operation);
       }
 
-      // Update inventory and stock ledgers atomically
+      // Update component inventory and StockLedger atomically. Bundle parents are virtual sale units;
+      // only their resolved physical components affect stock.
       const ledgers: any[] = [];
       const impactedProductIds = new Set<string>();
 
       for (let i = 0; i < lines.length; i++) {
         const l = lines[i];
-        const qtySold = Math.abs(l.quantity);
-        const qtyBefore = remainingStockByVariant.get(l.variantId) ?? 0;
-        if (qtyBefore < qtySold) {
-          throw new Error(
-            `INVENTORY_RACE_DETECTED: Variant ${l.variantId} no longer has ${qtySold} units available.`
-          );
-        }
-        const qtyAfter = qtyBefore - qtySold;
-        remainingStockByVariant.set(l.variantId, qtyAfter);
-        const ledger = await tx.stockLedger.create({
-          data: {
-            tenantId: ctx.tenantId,
-            branchId: ctx.branchId,
-            productId: l.productId,
-            variantId: l.variantId,
-            movementType: "SALE",
-            quantityChange: -qtySold,
-            quantity: -qtySold,
-            quantityBefore: qtyBefore,
-            quantityAfter: qtyAfter,
-            unitCost: l.unitCost || 0,
-            totalCost: qtySold * (l.unitCost || 0),
-            referenceType: "SALE",
-            referenceId: sale.id,
-            occurredAt: now,
-            deviceId: req.deviceId,
-            operationId: req.operationId,
-            idempotencyKey: `${req.idempotencyKey}-${l.variantId}-${i}`,
-            notes: `POS Sale ${sale.id}`,
-          },
-        });
-        ledgers.push(ledger);
+        const resolution = bundleResolutions.get(l.variantId);
+        const inventoryItems = resolution?.isBundle
+          ? resolution.components.map((component) => ({
+              variantId: component.variantId,
+              productId: component.productId,
+              quantity: Number(l.quantity) * component.quantity,
+              unitCost: component.unitCost,
+            }))
+          : [{
+              variantId: l.variantId,
+              productId: l.productId,
+              quantity: Number(l.quantity),
+              unitCost: Number(l.unitCost || 0),
+            }];
 
-        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, l.variantId);
-        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, l.variantId, null);
-        impactedProductIds.add(l.productId);
+        for (let componentIndex = 0; componentIndex < inventoryItems.length; componentIndex++) {
+          const component = inventoryItems[componentIndex];
+          const qtySold = Math.abs(Number(component.quantity));
+          if (!Number.isFinite(qtySold) || qtySold <= 0) continue;
+
+          if (typeof (tx as any).$queryRawUnsafe === "function") {
+            const lockRows = await (tx as any).$queryRawUnsafe(
+              `SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
+              component.variantId,
+              ctx.tenantId,
+              ctx.branchId,
+            ) as Array<{ id: string }>;
+            if (!lockRows.length) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+          }
+
+          const variantBefore = await tx.productVariant.findUnique({ where: { id: component.variantId } });
+          if (!variantBefore || variantBefore.tenantId !== ctx.tenantId || variantBefore.branchId !== ctx.branchId || variantBefore.productId !== component.productId) {
+            throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+          }
+
+          const ledgerRows = await tx.stockLedger.findMany({
+            where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: component.variantId },
+            orderBy: { occurredAt: "asc" },
+          });
+          const currentStock = calculateAvailableStock(ledgerRows as any);
+          const historicalRows = isBackdated ? ledgerRows.filter((row: any) => new Date(row.occurredAt || row.createdAt).getTime() < occurredAt.getTime()) : [];
+          const historicalStock = isBackdated ? calculateAvailableStock(historicalRows as any) : currentStock;
+          const qtyBefore = isBackdated ? historicalStock : currentStock;
+          if (qtyBefore < 0) throw new Error("INSUFFICIENT_STOCK: stock ledger invariant violated");
+
+          if (isBackdated) {
+            const validation = validateRetroactiveTimeline(ledgerRows as any, occurredAt, -qtySold);
+            if (!validation.valid) throw new Error(`INSUFFICIENT_STOCK: Backdated sale would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`);
+          }
+
+          const isOversell = !isBackdated && qtyBefore < qtySold;
+          const shortfall = isOversell ? qtySold - qtyBefore : 0;
+          const qtyAfter = isBackdated ? qtyBefore - qtySold : Math.max(0, qtyBefore - qtySold);
+
+          if (isOversell) {
+            const conflictId = `conflict:oversell:${saleId}:${component.variantId}`;
+            try {
+              await tx.$executeRawUnsafe(
+                `INSERT INTO sync_conflict_record (id, tenant_id, branch_id, operation_id, entity_type, entity_id, local_payload, remote_payload, status)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, 'OPEN')
+                 ON CONFLICT (id) DO NOTHING`,
+                conflictId,
+                ctx.tenantId,
+                ctx.branchId,
+                req.operationId || saleId,
+                "SaleOversell",
+                component.variantId,
+                JSON.stringify({ saleId, variantId: component.variantId, productId: component.productId, qtySold, qtyBefore, shortfall, bundleVariantId: resolution?.isBundle ? l.variantId : null }),
+                JSON.stringify({ currentInventory: qtyBefore }),
+              );
+            } catch {
+              throw new Error("SYNC_CONFLICT_PERSISTENCE_UNAVAILABLE");
+            }
+            await tx.auditEvent.create({
+              data: {
+                id: randomUUID(),
+                tenantId: ctx.tenantId,
+                branchId: ctx.branchId,
+                userId: ctx.userId,
+                deviceId: req.deviceId || "sync-engine",
+                action: "SYNC_CONFLICT_DETECTED",
+                entityType: "SaleOversell",
+                entityId: component.variantId,
+                metadata: {
+                  conflictId,
+                  operationId: req.operationId || saleId,
+                  saleId,
+                  variantId: component.variantId,
+                  qtySold,
+                  qtyBefore,
+                  shortfall,
+                  bundleVariantId: resolution?.isBundle ? l.variantId : null,
+                  source: "oversell",
+                },
+              },
+            });
+            if (resolution?.isBundle) throw new Error(`INSUFFICIENT_BUNDLE_COMPONENT_STOCK:${component.variantId}`);
+          }
+
+          const bundleSnapshot = resolution?.isBundle
+            ? {
+                parentLineId: l.id,
+                parentVariantId: l.variantId,
+                definitionVersion: resolution.definitionVersion,
+                components: resolution.components,
+              }
+            : null;
+          const notes = bundleSnapshot
+            ? `BUNDLE_SALE:${JSON.stringify(bundleSnapshot)}`
+            : (isOversell ? `POS Sale ${saleId} (OVERSELL DETECTED: shortfall ${shortfall})` : `POS Sale ${saleId}`);
+
+          const ledger = await tx.stockLedger.create({
+            data: {
+              id: randomUUID(),
+              tenantId: ctx.tenantId,
+              branchId: ctx.branchId,
+              productId: component.productId,
+              variantId: component.variantId,
+              movementType: "SALE",
+              quantityChange: -qtySold,
+              quantity: -qtySold,
+              quantityBefore: qtyBefore,
+              quantityAfter: qtyAfter,
+              unitCost: component.unitCost || 0,
+              totalCost: qtySold * (component.unitCost || 0),
+              referenceType: "SALE",
+              referenceId: sale.id,
+              occurredAt,
+              deviceId: req.deviceId,
+              operationId: req.operationId,
+              idempotencyKey: `${req.idempotencyKey}-${l.id}-${component.variantId}-${componentIndex}`,
+              notes,
+            },
+          });
+          ledgers.push(ledger);
+
+          await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, component.variantId);
+          await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, component.variantId, null);
+          impactedProductIds.add(component.productId);
+        }
       }
 
       for (const prodId of impactedProductIds) {
@@ -461,15 +480,181 @@ export class PrismaAtomicCommercialFinanceService {
       }
 
       const lookup = await this.accounts(tx, ctx);
-      const built = FinancialBridge.mapSaleToJournal(
-        ctx,
-        sale as any,
-        lookup as any,
-        (sale.payments || payments) as any,
-        (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1,
-      );
+      const tender = payments[0]?.paymentMethod === "BANK" ? "BANK" : payments[0]?.paymentMethod === "CREDIT" ? "CREDIT" : payments[0]?.paymentMethod === "MOBILE_MONEY" ? "MOBILE_MONEY" : "CASH";
+      const built = FinancialBridge.mapSaleToJournal(ctx, sale as any, lookup as any, tender as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
       await this.writeJournal(tx, ctx, built);
+      if (typeof tx.$executeRawUnsafe === "function") {
+        await tx.$executeRawUnsafe(
+          "INSERT INTO sync_change_journal (tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, record, source) VALUES ($1,$2,$3,'Sale',$4,'CREATE',$5::jsonb,'sale-service') ON CONFLICT (tenant_id, branch_id, operation_id) DO NOTHING",
+          ctx.tenantId,
+          ctx.branchId,
+          req.operationId,
+          sale.id,
+          JSON.stringify(sale),
+        );
+      }
       return { sale, lines: sale.lines, ledgers, drawerOperations };
+    });
+  }
+
+  async voidSale(ctx: TenantContext, saleId: string, reason: string, req: any = {}) {
+    return this.db.$transaction(async (tx: any) => {
+      const sale = await tx.sale.findFirst({
+        where: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId },
+        include: { lines: true, payments: true },
+      });
+      if (!sale) throw new Error("SALE_NOT_FOUND");
+      if (sale.status === "CANCELLED") return { sale, alreadyVoided: true };
+      if (sale.status !== "COMPLETED") throw new Error("SALE_INVALID_VOID_STATE");
+
+      for (const line of sale.lines) {
+        const rows = await tx.stockLedger.findMany({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: line.variantId },
+          orderBy: { occurredAt: "asc" },
+        });
+        const before = calculateAvailableStock(rows as any);
+        const key = "SALE-VOID-" + sale.id + "-" + line.variantId;
+        const existing = await tx.stockLedger.findFirst({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: key },
+        });
+        if (existing) continue;
+        const quantity = Math.abs(Number(line.quantity));
+        await tx.stockLedger.create({
+          data: {
+            id: randomUUID(),
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            productId: line.productId,
+            variantId: line.variantId,
+            movementType: "SALE_VOID",
+            quantityChange: quantity,
+            quantity,
+            quantityBefore: before,
+            quantityAfter: before + quantity,
+            unitCost: Number(line.unitCost || 0),
+            totalCost: quantity * Number(line.unitCost || 0),
+            referenceType: "SALE_VOID",
+            referenceId: sale.id,
+            occurredAt: new Date(),
+            deviceId: req.deviceId || "web",
+            operationId: req.operationId || sale.id,
+            idempotencyKey: key,
+            notes: reason,
+          },
+        });
+        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, line.variantId);
+        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, line.variantId, null);
+        await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, line.productId);
+      }
+
+      for (const payment of sale.payments.filter((p: any) => p.status === "COMPLETED")) {
+        await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
+        if (payment.paymentMethod === "CASH") {
+          const cashKey = "SALE-VOID-CASH-" + payment.id;
+          const existingCash = await tx.cashMovement.findFirst({
+            where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: cashKey },
+          });
+          if (!existingCash) {
+            const session = await tx.cashSession.findFirst({
+              where: { tenantId: ctx.tenantId, branchId: ctx.branchId, cashierId: ctx.userId, status: { in: ["OPEN", "ACTIVE"] } },
+              orderBy: { openedAt: "desc" },
+            });
+            if (!session) throw new Error("SALE_VOID_CASH_SESSION_REQUIRED");
+            await tx.cashMovement.create({
+              data: {
+                id: randomUUID(),
+                tenantId: ctx.tenantId,
+                branchId: ctx.branchId,
+                cashSessionId: session.id,
+                type: "CASH_OUT",
+                amount: payment.amount,
+                reason: "Void " + sale.saleNumber,
+                deviceId: req.deviceId || "web",
+                actorId: ctx.userId,
+                approvalStatus: "APPROVED",
+                idempotencyKey: cashKey,
+                occurredAt: new Date(),
+              },
+            });
+            await tx.cashSession.update({
+              where: { id: session.id },
+              data: { cashRefundsTotal: { increment: Number(payment.amount) } },
+            });
+          }
+        }
+      }
+
+      if (sale.customerId && sale.payments.some((p: any) => p.paymentMethod === "CREDIT")) {
+        await tx.customer.update({
+          where: { id: sale.customerId },
+          data: { currentBalance: { decrement: Number(sale.grandTotal) } },
+        });
+      }
+
+      const original = await tx.journalEntry.findFirst({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, sourceType: "SALE", sourceId: sale.id },
+        include: { lines: true },
+        orderBy: { createdAt: "desc" },
+      });
+      if (original) {
+        const reversalKey = "jrn-sale-void-" + sale.id;
+        const existingReversal = await tx.journalEntry.findUnique({ where: { idempotencyKey: reversalKey } }).catch(() => null);
+        if (!existingReversal) {
+          await this.writeJournal(tx, ctx, {
+            journal: {
+              id: randomUUID(),
+              journalNumber: "JRN-VOID-" + sale.id.slice(0, 8).toUpperCase(),
+              entryDate: new Date().toISOString(),
+              postingDate: new Date().toISOString(),
+              sourceType: "REVERSAL",
+              sourceId: sale.id,
+              description: "Void Sale " + sale.saleNumber,
+              currency: "TZS",
+              exchangeRate: 1,
+              totalDebit: Number(original.totalCredit),
+              totalCredit: Number(original.totalDebit),
+              isReversal: true,
+              reversalOfJournalId: original.id,
+              reversalReason: reason,
+              idempotencyKey: reversalKey,
+            },
+            lines: (original.lines || []).map((line: any) => ({
+              id: randomUUID(),
+              accountId: line.accountId,
+              costCenterId: line.costCenterId ?? null,
+              description: "Void reversal " + sale.saleNumber,
+              debit: Number(line.credit),
+              credit: Number(line.debit),
+              currency: line.currency || "TZS",
+              exchangeRate: Number(line.exchangeRate || 1),
+            })),
+          });
+        }
+      }
+
+      const updated = await tx.sale.update({
+        where: { id: sale.id },
+        data: { status: "CANCELLED" },
+        include: { lines: true, payments: true },
+      });
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          userId: ctx.userId,
+          deviceId: req.deviceId || "web",
+          action: "SALE_VOIDED",
+          entityType: "Sale",
+          entityId: sale.id,
+          metadata: {
+            reason,
+            operationId: req.operationId || sale.id,
+            idempotencyKey: req.idempotencyKey || sale.id,
+          },
+        },
+      });
+      return { sale: updated, alreadyVoided: false };
     });
   }
 
@@ -619,6 +804,7 @@ export class PrismaAtomicCommercialFinanceService {
           status: String(req.status || "PAID").toUpperCase(),
           taxDeductible: Boolean(req.taxDeductible),
           incurredAt: req.incurredAt || null,
+          employeeId: req.employeeId || null,
         });
         const existingFingerprint = JSON.stringify({
           category: existing.category,
@@ -631,6 +817,7 @@ export class PrismaAtomicCommercialFinanceService {
           status: existing.status,
           taxDeductible: Boolean(existing.taxDeductible),
           incurredAt: existing.incurredAt?.toISOString?.() || existing.incurredAt || null,
+          employeeId: existing.employeeId || null,
         });
         if (String(existing.idempotencyKey) === incomingKey && incomingFingerprint !== existingFingerprint) {
           throw new Error("EXPENSE_IDEMPOTENCY_CONFLICT");
@@ -638,18 +825,13 @@ export class PrismaAtomicCommercialFinanceService {
         return existing;
       }
 
+      if (req.employeeId) {
+        const employee = await tx.employee.findFirst({ where: { id: String(req.employeeId), tenantId: ctx.tenantId, OR: [{ branchId: ctx.branchId }, { branchId: null }] } });
+        if (!employee) throw new Error("STAFF_EXPENSE_EMPLOYEE_NOT_FOUND");
+      }
       const paymentMethod = this.normalizeExpensePaymentMethod(req.paymentMethod);
       const status = String(req.status || "PAID").toUpperCase();
       if (!["PENDING", "PAID"].includes(status)) throw new Error("INVALID_EXPENSE_STATUS");
-      if (req.categoryId) {
-        const category = await tx.expenseCategory.findFirst({ where: { id: String(req.categoryId), tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } });
-        if (!category) throw new Error("EXPENSE_CATEGORY_NOT_FOUND");
-      }
-      if (req.vendorId) {
-        const vendor = await tx.supplier.findFirst({ where: { id: String(req.vendorId), tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
-        if (!vendor) throw new Error("EXPENSE_VENDOR_NOT_FOUND");
-      }
-      const approvalStatus = status === "PENDING" ? "PENDING" : "APPROVED";
       const cashSession = paymentMethod === "CASH" && status === "PAID"
         ? await this.resolveCashSession(tx, ctx, req.cashSessionId, true)
         : null;
@@ -661,15 +843,9 @@ export class PrismaAtomicCommercialFinanceService {
           id,
           tenantId: ctx.tenantId,
           branchId: ctx.branchId,
+          employeeId: req.employeeId ? String(req.employeeId) : null,
           cashSessionId: status === "PAID" && paymentMethod === "CASH" ? (cashSession?.id ?? null) : null,
-          categoryId: req.categoryId || null,
-          vendorId: req.vendorId || null,
           category: req.category,
-          approvalStatus,
-          approvedById: approvalStatus === "APPROVED" ? ctx.userId : null,
-          approvedAt: approvalStatus === "APPROVED" ? now : null,
-          approvalReason: null,
-          recurringExpenseId: req.recurringExpenseId || null,
           amount: req.amount,
           reason: req.reason,
           description: req.description || req.reason,
@@ -683,15 +859,6 @@ export class PrismaAtomicCommercialFinanceService {
           paidAt: status === "PAID" ? now : null,
           idempotencyKey: String(req.idempotencyKey || id),
           incurredAt: req.incurredAt ? new Date(req.incurredAt) : now,
-        },
-      });
-
-      await tx.expenseApproval.create({
-        data: {
-          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, expenseId: expense.id,
-          status: approvalStatus, requestedById: ctx.userId, decidedById: approvalStatus === "APPROVED" ? ctx.userId : null,
-          decidedAt: approvalStatus === "APPROVED" ? now : null, reason: null,
-          idempotencyKey: `approval-${expense.id}`,
         },
       });
 
@@ -711,47 +878,16 @@ export class PrismaAtomicCommercialFinanceService {
           action: "EXPENSE_RECORDED",
           entityType: "Expense",
           entityId: expense.id,
-          metadata: { status, paymentMethod, amount: Number(req.amount), cashSessionId: cashSession?.id || null, idempotencyKey: expense.idempotencyKey },
+          metadata: { status, paymentMethod, amount: Number(req.amount), cashSessionId: cashSession?.id || null, employeeId: expense.employeeId || null, idempotencyKey: expense.idempotencyKey },
         },
       });
       return expense;
     });
   }
 
-  async approveExpense(ctx: TenantContext, id: string, reason = "Approved by finance") {
-    return this.db.$transaction(async (tx: any) => {
-      await this.lockExpense(tx, ctx, id);
-      const expense = await tx.expense.findUnique({ where: { id } });
-      if (!expense || expense.tenantId !== ctx.tenantId || expense.branchId !== ctx.branchId) throw new Error("EXPENSE_NOT_FOUND");
-      if (expense.status === "VOIDED") throw new Error("EXPENSE_ALREADY_VOIDED");
-      if (expense.approvalStatus === "APPROVED") return expense;
-      const now = new Date();
-      const updated = await tx.expense.update({ where: { id }, data: { approvalStatus: "APPROVED", approvedById: ctx.userId, approvedAt: now, approvalReason: reason } });
-      await tx.expenseApproval.update({ where: { expenseId: id }, data: { status: "APPROVED", decidedById: ctx.userId, decidedAt: now, reason } });
-      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: "web", action: "EXPENSE_APPROVED", entityType: "Expense", entityId: id, metadata: { reason } } });
-      return updated;
-    });
-  }
-
-  async rejectExpense(ctx: TenantContext, id: string, reason = "Rejected by finance") {
-    return this.db.$transaction(async (tx: any) => {
-      await this.lockExpense(tx, ctx, id);
-      const expense = await tx.expense.findUnique({ where: { id } });
-      if (!expense || expense.tenantId !== ctx.tenantId || expense.branchId !== ctx.branchId) throw new Error("EXPENSE_NOT_FOUND");
-      if (expense.status === "VOIDED") throw new Error("EXPENSE_ALREADY_VOIDED");
-      if (expense.status === "PAID") throw new Error("EXPENSE_ALREADY_PAID");
-      const now = new Date();
-      const updated = await tx.expense.update({ where: { id }, data: { approvalStatus: "REJECTED", approvalReason: reason } });
-      await tx.expenseApproval.update({ where: { expenseId: id }, data: { status: "REJECTED", decidedById: ctx.userId, decidedAt: now, reason } });
-      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: "web", action: "EXPENSE_REJECTED", entityType: "Expense", entityId: id, metadata: { reason } } });
-      return updated;
-    });
-  }
-
   async getExpenses(ctx: TenantContext) {
     return this.db.expense.findMany({
       where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
-      include: { attachments: { select: { id:true,fileName:true,mimeType:true,sizeBytes:true,sha256:true,createdAt:true } }, approvals: true },
       orderBy: { incurredAt: "desc" },
     });
   }
@@ -763,7 +899,6 @@ export class PrismaAtomicCommercialFinanceService {
       if (!expense || expense.tenantId !== ctx.tenantId || expense.branchId !== ctx.branchId) throw new Error("EXPENSE_NOT_FOUND");
       if (expense.status === "VOIDED") throw new Error("EXPENSE_ALREADY_VOIDED");
       if (expense.status === "PAID") return expense;
-      if (expense.approvalStatus !== "APPROVED") throw new Error("EXPENSE_APPROVAL_REQUIRED");
 
       const paymentMethod = this.normalizeExpensePaymentMethod(req.paymentMethod);
       const cashSession = paymentMethod === "CASH" ? await this.resolveCashSession(tx, ctx, req.cashSessionId, true) : null;

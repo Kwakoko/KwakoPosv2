@@ -13,12 +13,14 @@ export const CommercialPermissionEnum = z.enum([
   "INVENTORY_ADJUST",
   "INVENTORY_TRANSFER",
   "INVENTORY_COUNT",
+  "INVENTORY_BACKDATE",
   "PURCHASE_VIEW",
   "PURCHASE_CREATE",
   "PURCHASE_APPROVE",
   "PURCHASE_RECEIVE",
   "SALE_VIEW",
   "SALE_CREATE",
+  "SALE_BACKDATE",
   "SALE_VOID",
   "SALE_RETURN",
   "PAYMENT_VIEW",
@@ -90,6 +92,7 @@ export const CommercialPermissionEnum = z.enum([
   "PAYMENT_VIEW",
   "PAYMENT_RECONCILE",
   "DISCOUNT_MANAGE",
+  "PRICING_MANAGE",
   "COUPON_MANAGE",
   "REFUND_APPROVE",
   "CREDIT_NOTE_CREATE",
@@ -240,6 +243,7 @@ export const UpdateCategoryRequestSchema = z.object({
   description: z.string().optional(),
   color: z.string().optional(),
   isActive: z.boolean().optional(),
+  cascadeAssignedProducts: z.boolean().optional().default(true),
 });
 export type UpdateCategoryRequest = z.infer<typeof UpdateCategoryRequestSchema>;
 
@@ -272,6 +276,7 @@ export const UpdateBrandRequestSchema = z.object({
   origin: z.string().optional(),
   notes: z.string().optional(),
   isActive: z.boolean().optional(),
+  cascadeAssignedProducts: z.boolean().optional().default(true),
 });
 export type UpdateBrandRequest = z.infer<typeof UpdateBrandRequestSchema>;
 
@@ -302,7 +307,8 @@ export const CustomerSchema = z.object({
   creditLimit: z.number().nonnegative().default(0),
   currentBalance: z.number().default(0),
   openingBalance: z.number().default(0),
-  status: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
+  customerSegment: z.string().trim().min(1).max(64).nullable().optional(),
+  status: z.enum(["ACTIVE", "SUSPENDED", "INACTIVE"]).default("ACTIVE"),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
 });
@@ -317,6 +323,7 @@ export const CreateCustomerRequestSchema = z.object({
   address: z.string().optional(),
   creditLimit: z.number().nonnegative().optional(),
   openingBalance: z.number().optional(),
+  customerSegment: z.string().trim().min(1).max(64).optional(),
 });
 export type CreateCustomerRequest = z.infer<typeof CreateCustomerRequestSchema>;
 
@@ -489,6 +496,8 @@ export const CreatePriceChangeRequestSchema = z.object({
   deviceId: z.string().min(1),
   operationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
+  occurredAt: z.string().datetime().optional(),
+  isBackdated: z.boolean().optional().default(false),
 });
 export type CreatePriceChangeRequest = z.infer<typeof CreatePriceChangeRequestSchema>;
 
@@ -882,6 +891,7 @@ export const SaleSchema = z.object({
   saleNumber: z.string(),
   customerId: z.string().uuid().nullable().optional(),
   cashSessionId: z.string().uuid().nullable().optional(),
+  employeeId: z.string().uuid().nullable().optional(),
   subtotal: z.number().nonnegative(),
   discountTotal: z.number().nonnegative().default(0),
   taxTotal: z.number().nonnegative().default(0),
@@ -914,6 +924,15 @@ export const CreatePosSaleRequestSchema = z.object({
       unitCost: z.number().nonnegative().optional(),
       discountAmount: z.number().nonnegative().optional(),
       taxAmount: z.number().nonnegative().optional(),
+      bundleDefinitionVersion: z.string().min(1).optional(),
+      bundleComponents: z.array(
+        z.object({
+          variantId: z.string().min(1),
+          productId: z.string().min(1),
+          quantity: z.number().positive(),
+          unitCost: z.number().nonnegative(),
+        })
+      ).min(1).optional(),
     })
   ).min(1),
   discountTotal: z.number().nonnegative().optional(),
@@ -929,6 +948,8 @@ export const CreatePosSaleRequestSchema = z.object({
   deviceId: z.string().min(1),
   operationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
+  priceListId: z.string().uuid().optional(),
+  priceOverrideReason: z.string().trim().min(3).max(500).optional(),
 });
 export type CreatePosSaleRequest = z.infer<typeof CreatePosSaleRequestSchema>;
 
@@ -962,15 +983,14 @@ export const ReturnSchema = z.object({
 export type Return = z.infer<typeof ReturnSchema>;
 
 export const CreateSaleReturnRequestSchema = z.object({
-  originalSaleId: z.string().optional(),
-  customerId: z.string().optional(),
-  reason: z.string().min(1),
+  id: z.string().uuid().optional(),
+  originalSaleId: z.string().uuid(),
+  customerId: z.string().uuid().optional(),
+  reason: z.string().trim().min(3).max(500),
   refundType: z.enum(["CASH", "STORE_CREDIT", "BANK", "MOBILE_MONEY"]).default("CASH"),
-  provider: PaymentProviderEnum.optional(),
-  providerReference: z.string().optional(),
-  deviceId: z.string().min(1),
-  operationId: z.string().min(1),
-  idempotencyKey: z.string().min(1),
+  deviceId: z.string().min(1).max(128),
+  operationId: z.string().min(1).max(200),
+  idempotencyKey: z.string().min(1).max(200),
   items: z.array(
     z.object({
       variantId: z.string().uuid(),
@@ -999,23 +1019,7 @@ export const PaymentSchema = z.object({
   paymentMethod: PaymentMethodEnum,
   provider: PaymentProviderEnum.nullable().optional(),
   providerReference: z.string().nullable().optional(),
-  status: z.enum(["COMPLETED", "PENDING", "FAILED", "REFUNDED", "PARTIALLY_REFUNDED", "REVERSED"]),
-  refundedAmount: z.number().nonnegative().optional(),
-  isRefund: z.boolean().optional(),
-  refundReturnId: z.string().uuid().nullable().optional(),
-  refundReason: z.string().nullable().optional(),
-  refundMethod: z.string().nullable().optional(),
-  refundProvider: PaymentProviderEnum.nullable().optional(),
-  refundProviderReference: z.string().nullable().optional(),
-  reversalOfPaymentId: z.string().uuid().nullable().optional(),
-  reversalReason: z.string().nullable().optional(),
-  reversedAt: z.string().or(z.date()).nullable().optional(),
-  reversedById: z.string().uuid().nullable().optional(),
-  providerEventId: z.string().nullable().optional(),
-  providerVerifiedAt: z.string().or(z.date()).nullable().optional(),
-  reconciliationStatus: z.enum(["UNRECONCILED", "MATCHED", "VARIANCE"]).optional(),
-  reconciliationReference: z.string().nullable().optional(),
-  reconciledAt: z.string().or(z.date()).nullable().optional(),
+  status: z.enum(["COMPLETED", "PENDING", "FAILED", "REFUNDED"]),
   paidAt: z.string().or(z.date()),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
@@ -1031,40 +1035,8 @@ export const CreatePaymentRequestSchema = z.object({
   paymentMethod: PaymentMethodEnum,
   provider: PaymentProviderEnum.optional(),
   providerReference: z.string().optional(),
-  idempotencyKey: z.string().min(1),
 });
 export type CreatePaymentRequest = z.infer<typeof CreatePaymentRequestSchema>;
-
-export const RefundPaymentRequestSchema = z.object({
-  amount: z.number().positive(),
-  reason: z.string().trim().min(1),
-  refundMethod: PaymentMethodEnum.default("CASH"),
-  provider: PaymentProviderEnum.optional(),
-  providerReference: z.string().optional(),
-  idempotencyKey: z.string().min(1),
-});
-export type RefundPaymentRequest = z.infer<typeof RefundPaymentRequestSchema>;
-
-export const ReversePaymentRequestSchema = z.object({
-  reason: z.string().trim().min(1),
-  idempotencyKey: z.string().min(1),
-});
-export type ReversePaymentRequest = z.infer<typeof ReversePaymentRequestSchema>;
-
-export const PaymentReconciliationEntrySchema = z.object({
-  paymentId: z.string().uuid().optional(),
-  providerReference: z.string().optional(),
-  amount: z.number().nonnegative(),
-  paymentMethod: PaymentMethodEnum,
-  provider: PaymentProviderEnum.optional(),
-  externalReference: z.string().min(1),
-});
-export const PaymentReconciliationRequestSchema = z.object({
-  from: z.string().datetime(),
-  to: z.string().datetime(),
-  entries: z.array(PaymentReconciliationEntrySchema),
-});
-export type PaymentReconciliationRequest = z.infer<typeof PaymentReconciliationRequestSchema>;
 
 // ==========================================
 // Cash Session Contracts
@@ -1077,6 +1049,7 @@ export const CashSessionSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
   branchId: z.string().uuid(),
+  registerCode: z.string().trim().min(1).max(64).nullable().optional(),
   sessionNumber: z.string(),
   cashierId: z.string().uuid(),
   openedAt: z.string().or(z.date()),
@@ -1088,6 +1061,9 @@ export const CashSessionSchema = z.object({
   cashSalesTotal: z.number().default(0),
   cashRefundsTotal: z.number().default(0),
   cashExpensesTotal: z.number().default(0),
+  cashInTotal: z.number().default(0),
+  cashOutTotal: z.number().default(0),
+  safeDropTotal: z.number().default(0),
   variance: z.number().nullable().optional(),
   countSealedAt: z.string().or(z.date()).nullable().optional(),
   countSealedById: z.string().uuid().nullable().optional(),
@@ -1101,7 +1077,8 @@ export type CashSession = z.infer<typeof CashSessionSchema>;
 
 export const OpenCashSessionRequestSchema = z.object({
   openingCash: z.number().nonnegative().default(0),
-  notes: z.string().optional(),
+  registerCode: z.string().trim().min(1).max(64).optional(),
+  notes: z.string().max(500).optional(),
 });
 export type OpenCashSessionRequest = z.infer<typeof OpenCashSessionRequestSchema>;
 
@@ -1112,9 +1089,21 @@ export const SealCashSessionCountRequestSchema = z.object({
 export type SealCashSessionCountRequest = z.infer<typeof SealCashSessionCountRequestSchema>;
 
 export const CloseCashSessionRequestSchema = z.object({
-  notes: z.string().optional(),
+  notes: z.string().max(500).optional(),
+  managerApprovalReference: z.string().trim().min(1).max(200).optional(),
 });
 export type CloseCashSessionRequest = z.infer<typeof CloseCashSessionRequestSchema>;
+
+export const CashTransferRequestSchema = z.object({
+  destinationCashSessionId: z.string().uuid(),
+  amount: z.number().positive(),
+  reason: z.string().trim().min(3).max(500),
+  deviceId: z.string().trim().min(1).max(128),
+  witness: z.string().trim().max(200).optional(),
+  idempotencyKey: z.string().trim().min(1).max(200),
+  occurredAt: z.string().datetime().optional(),
+});
+export type CashTransferRequest = z.infer<typeof CashTransferRequestSchema>;
 
 export const ExpensePaymentMethodEnum = z.enum(["CASH", "BANK", "MOBILE_MONEY", "CARD"]);
 export type ExpensePaymentMethod = z.infer<typeof ExpensePaymentMethodEnum>;
@@ -1127,8 +1116,6 @@ export const ExpenseSchema = z.object({
   tenantId: z.string().uuid(),
   branchId: z.string().uuid(),
   cashSessionId: z.string().uuid().nullable().optional(),
-  categoryId: z.string().uuid().nullable().optional(),
-  vendorId: z.string().uuid().nullable().optional(),
   category: z.string().min(1),
   amount: z.number().positive(),
   reason: z.string().min(1),
@@ -1138,10 +1125,6 @@ export const ExpenseSchema = z.object({
   paymentRef: z.string().nullable().optional(),
   status: ExpenseStatusEnum.default("PAID"),
   taxDeductible: z.boolean().default(false),
-  approvalStatus: z.string().optional(),
-  approvedById: z.string().uuid().nullable().optional(),
-  approvedAt: z.string().or(z.date()).nullable().optional(),
-  approvalReason: z.string().nullable().optional(),
   authorizedById: z.string().uuid().nullable().optional(),
   paidById: z.string().uuid().nullable().optional(),
   paidAt: z.string().or(z.date()).nullable().optional(),
@@ -1158,8 +1141,7 @@ export type Expense = z.infer<typeof ExpenseSchema>;
 export const CreateExpenseRequestSchema = z.object({
   id: z.string().uuid().optional(),
   cashSessionId: z.string().uuid().optional(),
-  categoryId: z.string().uuid().optional(),
-  vendorId: z.string().uuid().optional(),
+  employeeId: z.string().uuid().optional(),
   category: z.string().min(1),
   amount: z.number().positive(),
   reason: z.string().min(1),
@@ -1243,6 +1225,7 @@ export const CommercialEntityTypeEnum = z.enum([
   "StockAdjustment",
   "StockLedger",
   "Customer",
+  "CustomerContact",
   "Supplier",
   "Sale",
   "Return",
@@ -1255,10 +1238,6 @@ export const CommercialEntityTypeEnum = z.enum([
   "Category",
   "Brand",
   "ProductPriceHistory",
-  "StockTransfer",
-  "StockCount",
-  "ProductBundle",
-  "WastageRecord",
   "Receivable",
   "Payable",
   "Setting",
@@ -1332,13 +1311,10 @@ export const SyncDeltaResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema).optional(),
   suppliers: z.array(SupplierSchema).optional(),
+  contacts: z.array(z.record(z.unknown())).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
-  stockTransfers: z.array(z.record(z.unknown())).optional(),
-  stockCounts: z.array(z.record(z.unknown())).optional(),
-  productBundles: z.array(z.record(z.unknown())).optional(),
-  wastageRecords: z.array(z.record(z.unknown())).optional(),
   sales: z.array(z.record(z.unknown())).optional(),
   payments: z.array(z.record(z.unknown())).optional(),
   expenses: z.array(ExpenseSchema).optional(),
@@ -1379,14 +1355,11 @@ export const SyncBootstrapResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema),
   suppliers: z.array(SupplierSchema),
+  contacts: z.array(z.record(z.unknown())).optional(),
   expenses: z.array(ExpenseSchema).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
-  stockTransfers: z.array(z.record(z.unknown())).optional(),
-  stockCounts: z.array(z.record(z.unknown())).optional(),
-  productBundles: z.array(z.record(z.unknown())).optional(),
-  wastageRecords: z.array(z.record(z.unknown())).optional(),
   settings: z.array(z.record(z.unknown())).optional(),
 });
 export type SyncBootstrapResponse = z.infer<typeof SyncBootstrapResponseSchema>;
@@ -1823,7 +1796,6 @@ export const AllocatePaymentRequestSchema = z.object({
   customerInvoiceId: z.string().uuid().optional(),
   supplierInvoiceId: z.string().uuid().optional(),
   amount: z.number().positive(),
-  allocationId: z.string().uuid().optional(),
 });
 export type AllocatePaymentRequest = z.infer<typeof AllocatePaymentRequestSchema>;
 
@@ -1894,8 +1866,19 @@ export const CreateBankTransactionRequestSchema = z.object({
   amount: z.number(),
   reference: z.string().min(1),
   description: z.string().optional(),
+  offsetAccountId: z.string().uuid().optional(),
+  offsetAccountCode: z.string().min(1).optional(),
 });
 export type CreateBankTransactionRequest = z.infer<typeof CreateBankTransactionRequestSchema>;
+
+export const CreateTaxRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1),
+  code: z.string().min(1),
+  rate: z.number().nonnegative().max(100),
+  isInclusive: z.boolean().default(true),
+});
+export type CreateTaxRequest = z.infer<typeof CreateTaxRequestSchema>;
 
 // Budget
 export const BudgetLineSchema = z.object({
@@ -2017,6 +2000,7 @@ export const BalanceSheetReportSchema = z.object({
     bankBalances: z.number(),
     accountsReceivable: z.number(),
     inventoryValuation: z.number(),
+    inputVatRecoverable: z.number().default(0),
     totalCurrentAssets: z.number(),
     totalAssets: z.number(),
   }),
@@ -2059,6 +2043,20 @@ export const TrialBalanceReportSchema = z.object({
   items: z.array(TrialBalanceReportItemSchema),
 });
 export type TrialBalanceReport = z.infer<typeof TrialBalanceReportSchema>;
+
+export const CashFlowReportSchema = z.object({
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  startDate: z.string(),
+  endDate: z.string(),
+  beginningCash: z.number(),
+  operatingCashFlow: z.number(),
+  investingCashFlow: z.number(),
+  financingCashFlow: z.number(),
+  netChangeInCash: z.number(),
+  endingCash: z.number(),
+});
+export type CashFlowReport = z.infer<typeof CashFlowReportSchema>;
 
 export const ExecutiveFinancialDashboardSchema = z.object({
   revenue: z.number(),

@@ -10,19 +10,19 @@ const EXPECTED_SUBMENU_GROUPS = 126;
 const EXPECTED_SUBITEM_COUNT = 659;
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "7d05d36ec0b43f970733844c357c342e36cf042b",
-  "apps/web/src/App.tsx": "427fe07b2ee6ba423961eb90f0d38b773cf5b079",
-  "apps/web/src/modules/moduleRegistry.ts": "6002fc7096bf4412cc9bc8643c26a0561b08bfc6",
+  "package.json": "29fdef497005f558d7bb5347aff0b5e9d2641925",
+  "apps/web/src/App.tsx": "a67c77edd34362b241599ed2b5f28b6f55a7acd2",
+  "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
   "apps/web/src/pages/VerticalCommandCenterPage.tsx": "dc932c2adf63194e6af11ed340be7ba43f9d498f",
-  "apps/web/src/pages/DashboardPage.tsx": "cbfe27afea615933098d3888bb958e5b944012fb",
-  "apps/web/src/pages/InventoryPage.tsx": "cfaffba50bacb7dae9d3be7d02be28566c743707",
-  "apps/web/src/pages/PurchasingPage.tsx": "3611fe0e22ec6cc6ab35cee9a755be922b46748e",
-  "apps/web/src/pages/ReportsPage.tsx": "4c66a81a465479ddd35cad56005002d73b99772b",
-  "apps/web/src/pages/SettingsPage.tsx": "ce3542534d5b4f7db09ad5b29aa75483cbb28975",
-  "apps/web/src/pages/CashDrawerPage.tsx": "71439a29b8c2ae894f3fe6a7ca97c44f2c1795a2",
-  "apps/web/src/pages/ReceiptsPage.tsx": "406a4daffd312c1a418dec0cb9f35e6bda88be52",
-  ".github/workflows/production-certification.yml": "4ea8fa0290d154e3a66ea135e524928f7bf1d273",
-  ".github/workflows/production-release-exact-main.yml": "6293102ebfff3d5b578dc8e76fe8323f481f41c2"
+  "apps/web/src/pages/DashboardPage.tsx": "59b98fc129531507362218674b135597bf224f8d",
+  "apps/web/src/pages/InventoryPage.tsx": "b82e73ee898254e4c5c89a979d700b8f6f4124b3",
+  "apps/web/src/pages/PurchasingPage.tsx": "ab0650f3cbd59906f8286a2ca11e2b46898933e2",
+  "apps/web/src/pages/ReportsPage.tsx": "0215ab6d294a164bc3c83b22717e73abcea27cee",
+  "apps/web/src/pages/SettingsPage.tsx": "bae3919e787d81c2a3a8a6e9f9aba3a6e0350a1a",
+  "apps/web/src/pages/CashDrawerPage.tsx": "8f57d8586a833d37aee9f37d99efad869fcb607e",
+  "apps/web/src/pages/ReceiptsPage.tsx": "d5744e2e5f5f89b78c162727fe6b9978776bf44a",
+  ".github/workflows/production-certification.yml": "cbb5ee8eb264dcd89752b036bce03f76afb62048",
+  ".github/workflows/production-release-exact-main.yml": "83f32ee23991146795bb22cde954c1734d5b9aea",
 };
 
 const MARKERS: Array<[string, string, string]> = [

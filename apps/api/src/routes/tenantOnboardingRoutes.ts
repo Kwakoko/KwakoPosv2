@@ -10,11 +10,20 @@ function requireContext(req: FastifyRequest) {
 }
 function isPlatformProvisioner(ctx: { roles: string[]; permissions: string[] }): boolean {
   const roles = ctx.roles.map(String).map((v) => v.toUpperCase());
-  const permissions = ctx.permissions.map(String).map((v) => v.toUpperCase());
-  return roles.includes("SUPER_ADMIN") || permissions.includes("SUPER_ADMIN_OPERATIONS");
+  return roles.includes("PLATFORM_SUPER_ADMIN");
 }
 function isOwner(ctx: { roles: string[]; permissions: string[] }): boolean {
   return ctx.roles.map(String).map((v) => v.toUpperCase()).includes("OWNER");
+}
+function canAdministerTenant(ctx: { tenantId: string; roles: string[]; permissions: string[] }, tenantId: string): boolean {
+  if (isPlatformProvisioner(ctx)) return true;
+  if (String(ctx.tenantId) !== String(tenantId)) return false;
+  const roles = ctx.roles.map(String).map((v) => v.toUpperCase());
+  const permissions = ctx.permissions.map(String).map((v) => v.toLowerCase());
+  return roles.some((role) => ["OWNER", "ADMIN"].includes(role)) ||
+    permissions.includes("*") ||
+    permissions.includes("settings.manage") ||
+    permissions.includes("tenant.manage");
 }
 function sendError(reply: FastifyReply, error: unknown) {
   if (error instanceof TenantOnboardingError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
@@ -42,6 +51,9 @@ export function tenantOnboardingRoutes(server: FastifyInstance): void {
   server.patch("/api/v1/onboarding/tenants/:tenantId", async (req, reply) => {
     try {
       const ctx = requireContext(req); const tenantId = String((req.params as any)?.tenantId || "");
+      if (!canAdministerTenant(ctx, tenantId)) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Tenant administration permission is required" } });
+      }
       return reply.send({ success: true, data: await service.update(tenantId, req.body, { tenantId: ctx.tenantId, userId: ctx.userId, isSuperAdmin: isPlatformProvisioner(ctx) }) });
     } catch (error) { return sendError(reply, error); }
   });

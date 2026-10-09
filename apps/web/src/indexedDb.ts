@@ -37,6 +37,10 @@ const SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES = new Set([
 
 /** Maximum number of server rejections before an outbox item is permanently abandoned. */
 export const MAX_OUTBOX_RETRIES = 5;
+/** Durable retry schedule: persisted before the next automatic replay. */
+export const OUTBOX_RETRY_BASE_DELAY_MS = 5_000;
+export const OUTBOX_RETRY_MAX_DELAY_MS = 60_000;
+export const OUTBOX_RETRY_JITTER_RATIO = 0.20;
 
 export function assertSyncOutboxEntityTypeAllowed(entityType: string): void {
   if (SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES.has(String(entityType))) {
@@ -56,6 +60,7 @@ export interface OutboxItem {
     | "ProductPriceHistory"
     | "Sale"
     | "Customer"
+    | "CustomerContact"
     | "Supplier"
     | "Category"
     | "Brand"
@@ -78,6 +83,10 @@ export interface OutboxItem {
   resolution?: string;
   /** Number of times this item has been attempted and rejected by the server. */
   retryCount?: number;
+  /** ISO timestamp after which the item may be retried automatically. */
+  nextAttemptAt?: string;
+  /** ISO timestamp of the most recent push attempt. */
+  lastAttemptAt?: string;
   /** ISO timestamp when this item was permanently abandoned (retryCount >= MAX_OUTBOX_RETRIES). */
   abandonedAt?: string;
 }
@@ -111,6 +120,7 @@ export type NativeStore =
   | "receipts"
   | "customers"
   | "suppliers"
+  | "contacts"
   | "syncOutbox"
   | "traVfdOutbox"
   | "drawerOutbox"
@@ -133,6 +143,7 @@ export const ALL_STORE_NAMES: NativeStore[] = [
   "receipts",
   "customers",
   "suppliers",
+  "contacts",
   "syncOutbox",
   "traVfdOutbox",
   "drawerOutbox",
@@ -145,7 +156,7 @@ export const ALL_STORE_NAMES: NativeStore[] = [
 ];
 
 const DB_NAME = "kwakopos-v2";
-export const AUTHORITATIVE_SCHEMA_VERSION = 6;
+export const AUTHORITATIVE_SCHEMA_VERSION = 7;
 const PRE_V4_MIGRATION_SNAPSHOT_PREFIX = "__migration_snapshot_v4__:";
 
 function localSyncRank(item: { entityType: string; operationType: string }): number {
@@ -158,6 +169,7 @@ function localSyncRank(item: { entityType: string; operationType: string }): num
   if (item.entityType === "ProductVariant" && item.operationType === "DELETE") return 50;
   if (item.entityType === "StockAdjustment") return 60;
   if (item.entityType === "Customer" || item.entityType === "Supplier") return 70;
+  if (item.entityType === "CustomerContact") return 75;
   if (item.entityType === "PurchaseOrder") return 80;
   if (item.entityType === "PurchaseReceipt" || item.entityType === "Sale") return 90;
   if (item.entityType === "Expense") return 95;
@@ -274,6 +286,7 @@ export class LocalIndexedDbStore {
   receipts: QueryableStore<any>;
   customers: QueryableStore<any>;
   suppliers: QueryableStore<any>;
+  contacts: QueryableStore<any>;
   syncOutbox: QueryableStore<OutboxItem>;
   traVfdOutbox: QueryableStore<any>;
   drawerOutbox: QueryableStore<DrawerOutboxItem>;
@@ -320,6 +333,7 @@ export class LocalIndexedDbStore {
     this.receipts = new QueryableStore<any>("receipts", p);
     this.customers = new QueryableStore<any>("customers", p);
     this.suppliers = new QueryableStore<any>("suppliers", p);
+    this.contacts = new QueryableStore<any>("contacts", p);
     this.syncOutbox = new QueryableStore<OutboxItem>("syncOutbox", p);
     this.traVfdOutbox = new QueryableStore<any>("traVfdOutbox", p);
     this.drawerOutbox = new QueryableStore<DrawerOutboxItem>("drawerOutbox", p);
@@ -472,6 +486,8 @@ export class LocalIndexedDbStore {
         return this.customers;
       case "suppliers":
         return this.suppliers;
+      case "contacts":
+        return this.contacts;
       case "syncOutbox":
         return this.syncOutbox;
       case "traVfdOutbox":
@@ -648,6 +664,7 @@ export class LocalIndexedDbStore {
     this.receipts.clear();
     this.customers.clear();
     this.suppliers.clear();
+    this.contacts.clear();
     this.syncOutbox.clear();
     this.traVfdOutbox.clear();
     this.drawerOutbox.clear();
@@ -701,6 +718,7 @@ export class LocalIndexedDbStore {
     filterTenant(this.receipts, "receipts");
     filterTenant(this.customers, "customers");
     filterTenant(this.suppliers, "suppliers");
+    filterTenant(this.contacts, "contacts");
     filterTenant(this.syncOutbox, "syncOutbox");
     filterTenant(this.traVfdOutbox, "traVfdOutbox");
     filterTenant(this.drawerOutbox, "drawerOutbox");
@@ -1399,6 +1417,7 @@ export class LocalIndexedDbStore {
     const adjustments = Array.isArray(delta.adjustments) ? delta.adjustments : [];
     const customers = Array.isArray(delta.customers) ? delta.customers : [];
     const suppliers = Array.isArray(delta.suppliers) ? delta.suppliers : [];
+    const contacts = Array.isArray((delta as any).contacts) ? (delta as any).contacts : [];
     const categories = Array.isArray(delta.categories) ? delta.categories : [];
     const brands = Array.isArray(delta.brands) ? delta.brands : [];
     const priceHistories = Array.isArray(delta.priceHistories) ? delta.priceHistories : [];
@@ -1472,6 +1491,12 @@ export class LocalIndexedDbStore {
         this.saveSupplierLocal(supplier);
         appliedCount += 1;
       }
+      for (const contact of contacts) {
+        if (this.protectServerRecord("CustomerContact", String(contact.id))) continue;
+        this.contacts.set(String(contact.id), contact);
+        this.persist("contacts", String(contact.id), contact);
+        appliedCount += 1;
+      }
       if (settings.length) {
         for (const setting of settings as any[]) {
           const tenantId = String(setting.tenantId || "");
@@ -1514,7 +1539,7 @@ export class LocalIndexedDbStore {
       return appliedCount;
     }
 
-    const txStores = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "syncMetadata", "configuration"].filter(
+    const txStores = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "contacts", "syncMetadata", "configuration"].filter(
       (s) => this.nativeDb!.objectStoreNames.contains(s),
     );
     const tx = this.nativeDb.transaction(txStores, "readwrite");
@@ -1524,6 +1549,7 @@ export class LocalIndexedDbStore {
     const adjustmentsStore = tx.objectStore("stockAdjustments");
     const customersStore = tx.objectStore("customers");
     const suppliersStore = tx.objectStore("suppliers");
+    const contactsStore = this.nativeDb!.objectStoreNames.contains("contacts") ? tx.objectStore("contacts") : null;
     const configStore = this.nativeDb!.objectStoreNames.contains("configuration") ? tx.objectStore("configuration") : null;
 
     for (const product of products) {
@@ -1682,6 +1708,7 @@ export class LocalIndexedDbStore {
     const adjustments = Array.isArray(snapshot.adjustments) ? snapshot.adjustments : [];
     const customers = Array.isArray(snapshot.customers) ? snapshot.customers : [];
     const suppliers = Array.isArray(snapshot.suppliers) ? snapshot.suppliers : [];
+    const contacts = Array.isArray((snapshot as any).contacts) ? (snapshot as any).contacts : [];
     const categories = Array.isArray(snapshot.categories) ? snapshot.categories : [];
     const brands = Array.isArray(snapshot.brands) ? snapshot.brands : [];
     const priceHistories = Array.isArray(snapshot.priceHistories) ? snapshot.priceHistories : [];
@@ -1714,9 +1741,9 @@ export class LocalIndexedDbStore {
     }
 
     const records: Record<NativeStore, any[]> = {
-      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, syncOutbox: [], traVfdOutbox: [], drawerOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
+      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, contacts, syncOutbox: [], traVfdOutbox: [], drawerOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
     };
-    const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers"];
+    const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers", "contacts"];
     const isProtected = (store: NativeStore, id: string) => protectedKeys.get(store)?.has(String(id)) === true;
     const isActiveScope = (value: any) => value && value.tenantId === tenantId && value.branchId === branchId;
     const categoryValue = { key: "inventory_categories_meta", value: categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", parentId: c.parentId ?? null, isDefault: false })), tenantId, updatedAt: snapshot.snapshotTimestamp };
@@ -1766,7 +1793,7 @@ export class LocalIndexedDbStore {
     await Promise.all(hydrateStores.map((store) => this.hydrateMap(store, this.getTargetMap(store))));
     const txStores = [...replaceStores, "configuration", "syncMetadata"].filter((store) => this.nativeDb!.objectStoreNames.contains(store));
     const tx = this.nativeDb.transaction(txStores, "readwrite");
-    for (const store of replaceStores) {
+    for (const store of hydrateStores) {
       const os = tx.objectStore(store);
       const target = this.getTargetMap(store);
       if (target) for (const [key, value] of Array.from(target.entries())) if (isActiveScope(value) && !isProtected(store, String(key)) && !new Set((records[store] || []).map((row: any) => String(row.id))).has(String(key))) os.delete(key);
@@ -2027,10 +2054,11 @@ export class LocalIndexedDbStore {
   }
 
   retryFailedOutbox(tenantId?: string, branchId?: string): number {
-    // Only retry items that have NOT been permanently abandoned.
+    // Only retry items whose durable next-attempt deadline has arrived.
     const failed = this.getRetriableFailedOutbox(tenantId, branchId);
     for (const item of failed) {
       item.status = "PENDING";
+      item.nextAttemptAt = undefined;
       this.syncMetadata.delete(`error_${item.id}`);
       this.persist("syncOutbox", item.id, item);
       if (this.nativeDb) this.persistDelete("syncMetadata", `error_${item.id}`);
@@ -2043,6 +2071,7 @@ export class LocalIndexedDbStore {
     const item = this.syncOutbox.get(operationId);
     if (!item || item.status !== "FAILED") return;
     item.status = "PENDING";
+    item.nextAttemptAt = undefined;
     this.syncMetadata.delete(`error_${operationId}`);
     this.persist("syncOutbox", operationId, item);
     if (this.nativeDb) this.persistDelete("syncMetadata", `error_${operationId}`);
@@ -2058,6 +2087,8 @@ export class LocalIndexedDbStore {
     const item = this.syncOutbox.get(operationId);
     if (!item) return;
     item.status = "SYNCED";
+    item.nextAttemptAt = undefined;
+    item.lastAttemptAt = new Date().toISOString();
     this.persist("syncOutbox", operationId, item);
     this.setPersistenceStatus(item, item.operationType === "DELETE" ? "TOMBSTONED" : "SERVER_CONFIRMED");
     if (item.entityType === "Sale") {
@@ -2066,6 +2097,32 @@ export class LocalIndexedDbStore {
       if (sale) {
         sale.syncStatus = "Synced";
         this.persist("sales", saleId, sale);
+      }
+      // Remove provisional client StockLedger rows after the authoritative Sale has committed.
+      for (const [ledgerId, ledger] of Array.from(this.stockLedger.entries())) {
+        if (
+          ledger.tenantId === item.tenantId &&
+          ledger.branchId === item.branchId &&
+          ledger.referenceType === "SALE" &&
+          ledger.referenceId === saleId &&
+          ledger.synced === false
+        ) {
+          this.stockLedger.delete(ledgerId);
+          if (this.nativeDb) this.persistDelete("stockLedger", ledgerId);
+        }
+      }
+      for (const [outboxId, outbox] of Array.from(this.syncOutbox.entries())) {
+        if (
+          outboxId !== operationId &&
+          outbox.tenantId === item.tenantId &&
+          outbox.branchId === item.branchId &&
+          outbox.entityType === "StockAdjustment" &&
+          String(outbox.payload?.referenceType || "").toUpperCase() === "SALE" &&
+          String(outbox.payload?.referenceId || "") === saleId
+        ) {
+          this.syncOutbox.delete(outboxId);
+          if (this.nativeDb) this.persistDelete("syncOutbox", outboxId);
+        }
       }
     }
   }
@@ -2084,9 +2141,27 @@ export class LocalIndexedDbStore {
   markOutboxFailed(operationId: string, errorReason: string): void {
     const item = this.syncOutbox.get(operationId);
     if (!item) return;
+    const now = Date.now();
+    const retryCount = (item.retryCount ?? 0) + 1;
     item.status = "FAILED";
     item.error = errorReason;
-    item.retryCount = (item.retryCount ?? 0) + 1;
+    item.retryCount = retryCount;
+    item.lastAttemptAt = new Date(now).toISOString();
+
+    if (retryCount < MAX_OUTBOX_RETRIES) {
+      const exponentialDelay = Math.min(
+        OUTBOX_RETRY_MAX_DELAY_MS,
+        OUTBOX_RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(0, retryCount - 1)),
+      );
+      const jitterMultiplier =
+        1 - OUTBOX_RETRY_JITTER_RATIO + Math.random() * OUTBOX_RETRY_JITTER_RATIO * 2;
+      item.nextAttemptAt = new Date(
+        now + Math.round(exponentialDelay * jitterMultiplier),
+      ).toISOString();
+    } else {
+      item.nextAttemptAt = undefined;
+    }
+
     // Permanently abandon items that have hit the server-rejection retry cap.
     // They will no longer be re-queued by retryFailedOutbox() and will be
     // excluded from the pending-sync badge count shown to the user.
@@ -2107,9 +2182,13 @@ export class LocalIndexedDbStore {
    * These are items that can still be retried safely.
    */
   getRetriableFailedOutbox(tenantId?: string, branchId?: string): OutboxItem[] {
-    return this.getFailedOutbox(tenantId, branchId).filter(
-      (item) => !item.abandonedAt && (item.retryCount ?? 0) < MAX_OUTBOX_RETRIES,
-    );
+    const now = Date.now();
+    return this.getFailedOutbox(tenantId, branchId).filter((item) => {
+      if (item.abandonedAt || (item.retryCount ?? 0) >= MAX_OUTBOX_RETRIES) return false;
+      if (!item.nextAttemptAt) return true;
+      const retryAt = Date.parse(item.nextAttemptAt);
+      return Number.isFinite(retryAt) && retryAt <= now;
+    });
   }
 
   /**
@@ -2137,7 +2216,8 @@ export class LocalIndexedDbStore {
     for (const [id, item] of this.syncOutbox.entries()) {
       if (item.status === "SYNCED" || item.status === "CONFLICT_RESOLVED") continue; // preserve resolved conflict history
       const isWrongScope =
-        item.tenantId && item.tenantId !== activeTenantId;
+        (item.tenantId && item.tenantId !== activeTenantId) ||
+        (item.branchId && item.branchId !== activeBranchId);
       const isAbandonedStale =
         item.abandonedAt && Date.parse(item.abandonedAt) < cutoff;
       if (isWrongScope || isAbandonedStale) {

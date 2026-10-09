@@ -10,6 +10,10 @@ export class SuperAdminPlatformService {
     return globalSuperAdminPlatformEngine.executeTenantContextSwitch(adminId, tenantId, reason, timeLimitMinutes);
   }
 
+  public registerTenant(summary: Parameters<typeof globalSuperAdminPlatformEngine.registerTenant>[0]): void {
+    globalSuperAdminPlatformEngine.registerTenant(summary);
+  }
+
   public exitContextSwitch(switchId: string) {
     return globalSuperAdminPlatformEngine.exitTenantContextSwitch(switchId);
   }

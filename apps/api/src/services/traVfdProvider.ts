@@ -17,6 +17,8 @@ export interface TraVfdReceiptInput {
   zNumber: string; receiptVNumber: string; customerId: string; customerName: string;
   customerMobile: string; customerIdType: number;
   items: Array<{ id: string; description: string; quantity: number; unitPrice: number; discount: number; taxCode: number }>;
+  taxRatePct?: number;
+  taxInclusive?: boolean;
   payments: Array<{ type: string; amount: number }>;
 }
 
@@ -36,14 +38,21 @@ const normalizePayment = (value: string) => {
   return "CASH";
 };
 function buildReceiptXml(input: TraVfdReceiptInput, config: TraVfdProviderConfig): string {
+  const ratePct = Number.isFinite(Number(input.taxRatePct)) ? Math.max(0, Number(input.taxRatePct)) : 0;
+  const rate = ratePct / 100;
+  const inclusive = input.taxInclusive !== false;
   const items = input.items.map(item => "<ITEM>" + tag("ID", item.id) + tag("DESC", item.description) + tag("QTY", item.quantity) + tag("TAXCODE", item.taxCode) + tag("AMT", (item.quantity * item.unitPrice).toFixed(2)) + "</ITEM>").join("");
   const discount = input.items.reduce((s, i) => s + Number(i.discount || 0), 0);
-  const total = input.items.reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitPrice || 0), 0) - discount;
-  const taxable = input.items.filter(i => Number(i.taxCode) === 1).reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitPrice || 0) - Number(i.discount || 0), 0);
-  const tax = Math.max(0, Math.round((taxable - taxable / 1.18) * 100) / 100);
-  const netTaxable = Math.max(0, taxable - tax);
-  const vatTotal = `<VATTOTAL><VATRATE>A</VATRATE><NETTAMOUNT>${netTaxable.toFixed(2)}</NETTAMOUNT><TAXAMOUNT>${tax.toFixed(2)}</TAXAMOUNT></VATTOTAL>`;
-  const base = "<RCT>" + tag("DATE", input.date) + tag("TIME", input.time) + tag("TIN", config.tin) + tag("REGID", config.registrationId) + tag("EFDSERIAL", config.efdSerial) + tag("CUSTIDTYPE", input.customerIdType) + tag("CUSTID", input.customerId) + tag("CUSTNAME", input.customerName) + tag("MOBILENUM", input.customerMobile) + tag("RCTNUM", input.receiptNumber) + tag("DC", input.dailyCounter) + tag("GC", input.globalCounter) + tag("ZNUM", input.zNumber) + tag("RCTVNUM", input.receiptVNumber) + "<ITEMS>" + items + "</ITEMS>" + "<TOTALS>" + tag("TOTALTAXEXCL", (total - tax).toFixed(2)) + tag("TOTALTAXINCL", total.toFixed(2)) + tag("DISCOUNT", discount.toFixed(2)) + "</TOTALS>" + "<PAYMENTS>" + input.payments.map(p => "<PAYMENT>" + tag("PMTTYPE", normalizePayment(p.type)) + tag("PMTAMOUNT", Number(p.amount || 0).toFixed(2)) + "</PAYMENT>").join("") + "</PAYMENTS>" + "<VATTOTALS>" + vatTotal + "</VATTOTALS></RCT>";
+  const itemBase = input.items.reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitPrice || 0) - Number(i.discount || 0), 0);
+  const taxableAmount = input.items.filter(i => Number(i.taxCode) === 1).reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitPrice || 0) - Number(i.discount || 0), 0);
+  const tax = rate > 0 ? Math.max(0, Math.round((inclusive ? taxableAmount - taxableAmount / (1 + rate) : taxableAmount * rate) * 100) / 100) : 0;
+  const totalExcl = Math.max(0, inclusive ? itemBase - tax : itemBase);
+  const totalIncl = Math.max(0, inclusive ? itemBase : itemBase + tax);
+  const netTaxable = Math.max(0, inclusive && rate > 0 ? taxableAmount - tax : taxableAmount);
+  const vatTotal = rate > 0
+    ? `<VATTOTAL><VATRATE>A</VATRATE><NETTAMOUNT>${netTaxable.toFixed(2)}</NETTAMOUNT><TAXAMOUNT>${tax.toFixed(2)}</TAXAMOUNT></VATTOTAL>`
+    : `<VATTOTAL><VATRATE>C</VATRATE><NETTAMOUNT>${totalExcl.toFixed(2)}</NETTAMOUNT><TAXAMOUNT>0.00</TAXAMOUNT></VATTOTAL>`;
+  const base = "<RCT>" + tag("DATE", input.date) + tag("TIME", input.time) + tag("TIN", config.tin) + tag("REGID", config.registrationId) + tag("EFDSERIAL", config.efdSerial) + tag("CUSTIDTYPE", input.customerIdType) + tag("CUSTID", input.customerId) + tag("CUSTNAME", input.customerName) + tag("MOBILENUM", input.customerMobile) + tag("RCTNUM", input.receiptNumber) + tag("DC", input.dailyCounter) + tag("GC", input.globalCounter) + tag("ZNUM", input.zNumber) + tag("RCTVNUM", input.receiptVNumber) + "<ITEMS>" + items + "</ITEMS>" + "<TOTALS>" + tag("TOTALTAXEXCL", totalExcl.toFixed(2)) + tag("TOTALTAXINCL", totalIncl.toFixed(2)) + tag("DISCOUNT", discount.toFixed(2)) + "</TOTALS>" + "<PAYMENTS>" + input.payments.map(p => "<PAYMENT>" + tag("PMTTYPE", normalizePayment(p.type)) + tag("PMTAMOUNT", Number(p.amount || 0).toFixed(2)) + "</PAYMENT>").join("") + "</PAYMENTS>" + "<VATTOTALS>" + vatTotal + "</VATTOTALS></RCT>";
   const canonical = base.replace("<VATTOTALS></VATTOTALS>", "<VATTOTALS></VATTOTALS>");
   const signer = createSign("RSA-SHA1"); signer.update(canonical); signer.end();
   const signature = signer.sign(config.privateKeyPem, "base64");

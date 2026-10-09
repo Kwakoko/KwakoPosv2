@@ -465,6 +465,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // -------------------------------------------------------------------------
   const startI = Date.now();
   const retI = commercialRepo.createSaleReturn(ctx, {
+    originalSaleId: saleResG.sale.id,
     reason: "Customer exchanged size",
     refundType: "CASH",
     deviceId: "dev-synth-1",

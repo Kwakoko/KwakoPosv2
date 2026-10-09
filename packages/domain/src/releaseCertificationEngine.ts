@@ -29,6 +29,7 @@ export interface ReleaseEvidenceInput {
   evidenceClassificationValid: boolean;
   governanceConvergencePassed: boolean;
   finalApprovalPresent: boolean;
+  platformServicesProductionLockPassed: boolean;
   syntheticClaimsPresent?: boolean;
   productionOutcomeClaimsUnverified?: boolean;
 }
@@ -68,6 +69,7 @@ export function certifyReleaseEvidence(input: ReleaseEvidenceInput): ReleaseCert
     "governance-convergence": input.governanceConvergencePassed,
     "evidence-classification": input.evidenceClassificationValid,
     "final-approval": input.finalApprovalPresent,
+    "platform-services-production-lock": input.platformServicesProductionLockPassed,
   };
 
   if (input.syntheticClaimsPresent) gateState["governance-convergence"] = false;

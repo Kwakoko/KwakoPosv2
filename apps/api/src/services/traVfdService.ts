@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { prisma } from "@kwakopos2/database";
 import {
   TraVfdFiscalState,
@@ -60,6 +60,28 @@ function computeReceiptHash(previousHash: string, invoiceNumber: string, timesta
   const payload = `${previousHash}|${invoiceNumber}|${timestampUtc}|${canonicalMoney(grandTotal)}|${canonicalMoney(taxTotal)}`;
   return createHash("sha256").update(payload, "utf8").digest("hex");
 }
+async function recordFiscalAudit(
+  ctx: { tenantId: string; branchId: string; userId?: string },
+  action: string,
+  entityId: string,
+  metadata: Record<string, unknown> = {},
+  entityType = "TraVfdFiscalization",
+) {
+  await prisma.auditEvent.create({
+    data: {
+      id: randomUUID(),
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      userId: ctx.userId || "system",
+      deviceId: "tra-vfd",
+      action,
+      entityType,
+      entityId,
+      metadata: metadata as any,
+    },
+  });
+}
+
 function totalOf(payload: any): number {
   return Number(payload?.grandTotal ?? payload?.total ?? payload?.totalAmount ?? 0);
 }
@@ -67,7 +89,12 @@ function toDateParts(value: unknown): { date: string; time: string } {
   const d = new Date(String(value || new Date().toISOString()));
   return { date: d.toISOString().slice(0, 10), time: d.toISOString().slice(11, 19) };
 }
-function buildReceiptInput(row: any, config: any, counters: { dailyCounter: number; globalCounter: number }): TraVfdReceiptInput {
+function buildReceiptInput(
+  row: any,
+  config: any,
+  counters: { dailyCounter: number; globalCounter: number },
+  taxConfig: { ratePct: number; isInclusive: boolean },
+): TraVfdReceiptInput {
   const payload = row.requestPayload || {};
   const parts = toDateParts(payload.createdAt || payload.created_at || new Date().toISOString());
   const items = Array.isArray(payload.items) ? payload.items.map((item: any) => ({
@@ -76,12 +103,13 @@ function buildReceiptInput(row: any, config: any, counters: { dailyCounter: numb
     quantity: Number(item.quantity ?? item.qty ?? 0),
     unitPrice: Number(item.unitPrice ?? item.price ?? 0),
     discount: Number(item.discount ?? item.discountAmount ?? 0),
-    taxCode: Number(item.taxCode ?? ((Number(payload.taxAmount || 0) > 0 || Number(item.taxRate || payload.taxRate || 0) > 0) ? 1 : 3)),
+    taxCode: taxConfig.ratePct > 0 ? 1 : 3,
   })).filter((item: any) => item.quantity > 0) : [];
   const paymentMethod = String(payload.paymentMethod || payload.payment_type || "CASH");
   const amount = Number(payload.paidAmount ?? payload.grandTotal ?? 0);
   return {
     date: parts.date, time: parts.time, receiptNumber: String(payload.receiptNumber || row.transactionId),
+    taxRatePct: taxConfig.ratePct, taxInclusive: taxConfig.isInclusive,
     dailyCounter: counters.dailyCounter, globalCounter: counters.globalCounter,
     zNumber: String(payload.zNumber || parts.date.replaceAll("-", "")),
     receiptVNumber: String(payload.receiptVNumber || payload.rctvnum || ""),
@@ -137,6 +165,17 @@ export class TraVfdService {
         efdSerial: input.efdSerial, receiptCode: input.receiptCode, routingKey: input.routingKey,
       },
     });
+    await recordFiscalAudit(
+      { tenantId: ctx.tenantId, branchId: ctx.branchId, userId: (ctx as any).userId },
+      "TRA_VFD_CONFIG_UPDATED",
+      row.id,
+      {
+        enabled: row.enabled, environment: row.environment, endpointConfigured: Boolean(row.endpoint),
+        tinConfigured: Boolean(row.tin), certificateConfigured: Boolean(row.certSerial),
+        registrationConfigured: Boolean(row.registrationId), efdSerialConfigured: Boolean(row.efdSerial),
+      },
+      "TraVfdConfig",
+    );
     return {
       enabled: row.enabled, endpoint: row.endpoint, environment: row.environment as "TEST" | "PRODUCTION",
       tin: row.tin || undefined, certSerial: row.certSerial || undefined, registrationId: row.registrationId || undefined,
@@ -184,7 +223,11 @@ export class TraVfdService {
       });
       return created;
     });
-    return mapFiscalization(fiscalization);
+    const mapped = mapFiscalization(fiscalization);
+    await recordFiscalAudit(ctx as any, "TRA_VFD_FISCAL_ENQUEUED", mapped.id, {
+      transactionId: mapped.transactionId, chainSequence: mapped.chainSequence, receiptId: mapped.receiptId, state: mapped.state,
+    });
+    return mapped;
   }
 
   async get(ctx: { tenantId: string; branchId: string }, id: string) {
@@ -220,9 +263,46 @@ export class TraVfdService {
         data: { status: "SUBMITTING", attempts: attempt, lastError: null },
       }),
     ]);
+    await recordFiscalAudit(ctx as any, "TRA_VFD_SUBMITTING", row.id, { attempt });
     try {
       const counters = await reserveCounters(config.id);
-      const input = buildReceiptInput(row, config, counters);
+      const taxSettingRow = await prisma.setting.findFirst({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, scope: "BRANCH", key: "tax.config", isActive: true },
+        orderBy: { updatedAt: "desc" },
+      });
+      const taxValue = (taxSettingRow?.value || {}) as any;
+      let fiscalTax: any = null;
+      if (Boolean(taxValue.vatEnabled)) {
+        const taxId = typeof taxValue.taxId === "string" ? taxValue.taxId : "";
+        fiscalTax = taxId
+          ? await prisma.tax.findFirst({ where: { id: taxId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } })
+          : null;
+        const taxCode = String(taxValue.taxCode || "VAT").trim().toUpperCase();
+        if (!fiscalTax) {
+          fiscalTax = await prisma.tax.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: taxCode, isActive: true } });
+        }
+        if (!fiscalTax) {
+          const rate = Number(taxValue.vatRatePercent ?? 0);
+          if (!Number.isFinite(rate) || rate < 0 || rate > 100) throw new Error("TRA_VFD_TAX_RATE_INVALID");
+          fiscalTax = await prisma.tax.upsert({
+            where: { tenantId_branchId_code: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: taxCode } },
+            create: {
+              id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+              name: String(taxValue.taxName || "VAT"), code: taxCode, rate,
+              isInclusive: taxValue.taxInclusivePricing !== false, isActive: true,
+            },
+            update: {
+              name: String(taxValue.taxName || "VAT"), rate,
+              isInclusive: taxValue.taxInclusivePricing !== false, isActive: true,
+            },
+          });
+        }
+      }
+      const fiscalTaxConfig = {
+        ratePct: fiscalTax ? Number(fiscalTax.rate) : 0,
+        isInclusive: fiscalTax ? Boolean(fiscalTax.isInclusive) : true,
+      };
+      const input = buildReceiptInput(row, config, counters, fiscalTaxConfig);
       const response = await provider.submitReceipt(input);
       const responsePayload = { provider: "TRA", environment: config.environment, verificationUrl: response.verificationUrl, number: response.number, date: response.date, time: response.time, code: response.code, message: response.message };
       await prisma.$transaction([
@@ -241,6 +321,10 @@ export class TraVfdService {
           data: { status: "SENT", processedAt: new Date(), lastError: null, nextAttemptAt: null },
         }),
       ]);
+      await recordFiscalAudit(ctx as any, "TRA_VFD_ACCEPTED", row.id, {
+        fiscalReceiptNumber: response.number == null ? null : String(response.number),
+        verificationCode: response.verificationCode || null,
+      });
       return this.reconcile(ctx, row.id);
     } catch (error: any) {
       const message = error?.message || "TRA_VFD_SUBMISSION_FAILED";
@@ -267,6 +351,7 @@ export class TraVfdService {
         where: { id: row.id },
         data: { reconciliationStatus: "UNAVAILABLE", reconciliationError: message, nextAttemptAt: reconciliationRetryAt() },
       });
+      await recordFiscalAudit(ctx as any, "TRA_VFD_RECONCILIATION_FAILED", row.id, { reconciliationStatus: "UNAVAILABLE", error: message });
       return mapFiscalization(updated);
     }
 
@@ -286,18 +371,24 @@ export class TraVfdService {
             responsePayload: { ...responsePayload, reconciliation: result.details } as any,
           },
         });
+        await recordFiscalAudit(ctx as any, "TRA_VFD_VERIFIED", row.id, {
+          reconciliationStatus: "MATCHED", fiscalReceiptNumber: verified.fiscalReceiptNumber,
+          verificationCode: verified.verificationCode,
+        });
         return mapFiscalization(verified);
       }
       const mismatch = await prisma.traVfdFiscalization.update({
         where: { id: row.id },
         data: { reconciliationStatus: "MISMATCH", reconciledAt: new Date(), reconciliationError: "TRA_VFD_VERIFICATION_MISMATCH", lastError: "TRA_VFD_VERIFICATION_MISMATCH" },
       });
+      await recordFiscalAudit(ctx as any, "TRA_VFD_RECONCILIATION_FAILED", row.id, { reconciliationStatus: "MISMATCH" });
       return mapFiscalization(mismatch);
     } catch (error: any) {
       const unavailable = await prisma.traVfdFiscalization.update({
         where: { id: row.id },
         data: { reconciliationStatus: "UNAVAILABLE", reconciliationError: error?.message || "TRA_VFD_VERIFICATION_UNAVAILABLE", nextAttemptAt: reconciliationRetryAt() },
       });
+      await recordFiscalAudit(ctx as any, "TRA_VFD_RECONCILIATION_FAILED", row.id, { reconciliationStatus: "UNAVAILABLE", error: error?.message || "TRA_VFD_VERIFICATION_UNAVAILABLE" });
       return mapFiscalization(unavailable);
     }
   }
@@ -365,6 +456,7 @@ export class TraVfdService {
         data: { status: "FAILED", lastError: reason },
       }),
     ]);
+    await recordFiscalAudit(ctx as any, "TRA_VFD_REJECTED", id, { reason, attempt });
     return mapFiscalization(await prisma.traVfdFiscalization.findUniqueOrThrow({ where: { id } }));
   }
   private async retry(id: string, ctx: { tenantId: string; branchId: string }, reason: string, attempt?: number) {
@@ -380,6 +472,9 @@ export class TraVfdService {
         data: { status: "PENDING", attempts: currentAttempt, lastError: reason, nextAttemptAt: next },
       }),
     ]);
+    await recordFiscalAudit(ctx as any, "TRA_VFD_RETRY_SCHEDULED", id, {
+      reason, attempt: currentAttempt, nextAttemptAt: next.toISOString(),
+    });
     return mapFiscalization(await prisma.traVfdFiscalization.findUniqueOrThrow({ where: { id } }));
   }
 }

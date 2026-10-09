@@ -26,19 +26,20 @@ const baseEvidence = () => ({
   evidenceClassificationValid: true,
   governanceConvergencePassed: true,
   finalApprovalPresent: true,
+  platformServicesProductionLockPassed: true,
 });
 
 describe("Step 24 — Release Certification Governance", () => {
-  it("defines one certificate and the complete 15-gate release contract", () => {
+  it("defines one certificate and the complete 16-gate release contract", () => {
     expect(KWAKOKO_RELEASE_CERTIFICATION_CERTIFICATE).toBe("KWAKOKO-RELEASE-CERTIFICATION-CERTIFICATE-v1.0");
-    expect(RELEASE_CERTIFICATION_GATES).toHaveLength(15);
+    expect(RELEASE_CERTIFICATION_GATES).toHaveLength(16);
     expect(RELEASE_CERTIFICATION_INVARIANTS).toHaveLength(17);
   });
 
   it("passes a complete controlled certification", () => {
     const result = certifyReleaseEvidence(baseEvidence());
     expect(result.decision).toBe("PASS");
-    expect(result.gatesPassed).toBe(15);
+    expect(result.gatesPassed).toBe(16);
     expect(result.gatesFailed).toBe(0);
     expect(result.evidenceClassification).toBe("CONTROLLED_CERTIFICATION");
   });
