@@ -6852,9 +6852,9 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
       if (query.status) { values.push(query.status); sql += " AND status=$" + values.length; }
       if (query.poId) { values.push(query.poId); sql += " AND po_id=$" + values.length; }
       sql += " ORDER BY created_at DESC LIMIT 200";
-      const rows = await prisma.$queryRawUnsafe(sql, ...values);
+      const rows = await prisma.$queryRawUnsafe<any[]>(sql, ...values);
       const data = await Promise.all(rows.map(async (row: any) => {
-        const lines = await prisma.$queryRawUnsafe("SELECT * FROM supply_chain_shipment_lines WHERE shipment_id=$1 ORDER BY created_at,id", row.id);
+        const lines = await prisma.$queryRawUnsafe<any[]>("SELECT * FROM supply_chain_shipment_lines WHERE shipment_id=$1 ORDER BY created_at,id", row.id);
         return supplyShipmentDto(row, lines);
       }));
       return reply.send({ success: true, data });
@@ -6870,7 +6870,7 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
       if (!supplyShipmentRoleAllowed(ctx, false)) return reply.status(403).send({ success: false, error: { code: "FORBIDDEN" } });
       const data = await getScopedSupplyShipment(prisma, ctx, String((req.params as any).id || ""));
       if (!data) return reply.status(404).send({ success: false, error: { code: "SHIPMENT_NOT_FOUND" } });
-      const events = await prisma.$queryRawUnsafe(
+      const events = await prisma.$queryRawUnsafe<any[]>(
         "SELECT action,from_status,to_status,payload,created_at FROM supply_chain_shipment_events WHERE shipment_id=$1 AND tenant_id=$2 AND branch_id=$3 ORDER BY created_at",
         data.shipmentId, ctx.tenantId, ctx.branchId,
       );
