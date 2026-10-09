@@ -773,7 +773,14 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         const rows = await orderFor(tx, id, c, "SELLER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
         if (await replayEvent(tx, c, b.idempotencyKey)) return o;
         if (!["DISPATCHED","PARTIALLY_DISPATCHED"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_TRANSIT:" + o.status);
-        const l = { ...(o.logistics || {}), inTransitAt: new Date().toISOString() };
+        const eta = b.eta ? new Date(b.eta) : null;
+        const shipmentRows = await tx.$queryRawUnsafe(
+          "UPDATE supply_chain_shipments SET status='IN_TRANSIT',carrier_name=COALESCE(NULLIF($4,''),carrier_name),tracking_number=COALESCE(NULLIF($5,''),tracking_number),carrier_eta=COALESCE($6,carrier_eta),updated_at=now() WHERE tenant_id=$1 AND branch_id=$2 AND gateway_order_id=$3 AND status='CONFIRMED' RETURNING id",
+          o.buyer_tenant_id, o.buyer_branch_id, o.id, b.carrierName || "", b.trackingNumber || "", eta,
+        );
+        if (!shipmentRows.length) throw new Error("SHIPMENT_NOT_READY_FOR_TRANSIT");
+        const l = { ...(o.logistics || {}), inTransitAt: new Date().toISOString(),
+          shipmentIdsInTransit: shipmentRows.map((x: any) => x.id) };
         for (const k of ["carrierName","trackingNumber","eta"] as const) if (b[k] !== undefined) (l as any)[k] = b[k];
         const updated = await patchOrder(tx, id, { status: "IN_TRANSIT", logistics: l });
         await event(tx, id, c, "ORDER_IN_TRANSIT", o.status, "IN_TRANSIT", b.idempotencyKey, l); return updated;
