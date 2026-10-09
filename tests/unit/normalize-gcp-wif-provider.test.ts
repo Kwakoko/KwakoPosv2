@@ -38,6 +38,21 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(run(mixedCase)).toBe("provider=" + canonical);
   });
 
+  it("strips an editor-inserted UTF-8 BOM only at value boundaries", () => {
+    expect(run("\ufeff" + canonical)).toBe("provider=" + canonical);
+    expect(run(canonical + "\ufeff")).toBe("provider=" + canonical);
+    expect(run('\ufeff"' + canonical + '"\ufeff')).toBe("provider=" + canonical);
+    expect(run("\ufeffhttps://iam.googleapis.com/v1/" + canonical)).toBe("provider=" + canonical);
+  });
+
+  it("reports safe first-segment metadata for unknown invisible prefixes", () => {
+    const result = runFailure("\u200b" + canonical);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("safe_shape_diagnostic");
+    expect(result.stderr).not.toContain("123456789012");
+    expect(result.stderr).not.toContain("5provider");
+  });
+
   it("normalizes supported HTTPS and scheme-less IAM URL forms", () => {
     expect(run("https://iam.googleapis.com/" + canonical)).toBe("provider=" + canonical);
     expect(run("//iam.googleapis.com/" + canonical + "/")).toBe("provider=" + canonical);

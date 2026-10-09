@@ -17,7 +17,9 @@ RESOURCE_LAYOUT = re.compile(
 
 
 def normalize(value: str) -> str:
-    provider = value.strip()
+    # Editor exports can prepend or append a UTF-8 BOM. Remove that marker
+    # only at the whole-value boundary; never rewrite characters inside IDs.
+    provider = value.strip().strip("\ufeff").strip()
 
     # A secret copied through an editor may contain line-wraps. Remove only
     # CR/LF boundaries and adjacent horizontal indentation; all other content
@@ -29,6 +31,7 @@ def normalize(value: str) -> str:
 
     if len(provider) >= 2 and provider[0] == provider[-1] and provider[0] in {"'", '"'}:
         provider = provider[1:-1].strip()
+    provider = provider.strip().strip("\ufeff").strip()
 
     # Accept canonical resource names and equivalent IAM URL/API-version forms.
     provider = re.sub(r"^https?://iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
