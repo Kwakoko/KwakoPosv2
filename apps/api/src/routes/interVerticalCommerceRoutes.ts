@@ -154,9 +154,23 @@ async function orderFor(tx: any, id: string, ctx: Ctx, side?: "BUYER" | "SELLER"
       : "((buyer_tenant_id=$2 AND buyer_branch_id=$3) OR (seller_tenant_id=$2 AND seller_branch_id=$3))";
   return tx.$queryRawUnsafe("SELECT * FROM inter_vertical_orders WHERE id=$1 AND " + where + (lock ? " FOR UPDATE" : ""), id, ctx.tenantId, ctx.branchId);
 }
-async function replayEvent(tx: any, ctx: Ctx, key: string): Promise<boolean> {
-  const rows = await tx.$queryRawUnsafe("SELECT id FROM inter_vertical_order_events WHERE tenant_id=$1 AND branch_id=$2 AND idempotency_key=$3", ctx.tenantId, ctx.branchId, key);
-  return rows.length > 0;
+async function replayEvent(
+  tx: any, ctx: Ctx, key: string, orderId: string, action: string,
+  expectedPayload: Record<string, unknown> = {},
+): Promise<boolean> {
+  const rows = await tx.$queryRawUnsafe(
+    "SELECT order_id,action,payload FROM inter_vertical_order_events WHERE tenant_id=$1 AND branch_id=$2 AND idempotency_key=$3",
+    ctx.tenantId, ctx.branchId, key,
+  );
+  if (!rows.length) return false;
+  const row = rows[0];
+  if (String(row.order_id) !== orderId || String(row.action) !== action) throw new Error("IDEMPOTENCY_KEY_ALREADY_USED");
+  let payload = row.payload;
+  if (typeof payload === "string") { try { payload = JSON.parse(payload); } catch { payload = {}; } }
+  for (const [field, expected] of Object.entries(expectedPayload)) {
+    if (String((payload as any)?.[field]) !== String(expected)) throw new Error("IDEMPOTENCY_KEY_ALREADY_USED");
+  }
+  return true;
 }
 async function ledgerQty(tx: any, tenantId: string, branchId: string, variantId: string): Promise<number> {
   const r = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId, branchId, variantId } });
@@ -654,7 +668,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const id = String((req.params as any).id || ""), b = OrderRespond.parse(req.body);
       const row = await db.$transaction(async (tx: any) => {
         const rows = await orderFor(tx, id, c, "SELLER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
-        if (await replayEvent(tx, c, b.idempotencyKey)) return o;
+        if (await replayEvent(tx, c, b.idempotencyKey, id, b.action === "REJECT" ? "ORDER_REJECTED" : "ORDER_ACCEPTED")) return o;
         if (o.status !== "SUBMITTED") throw new Error("ORDER_INVALID_STATUS:" + o.status);
         if (b.action === "REJECT") {
           const updated = await patchOrder(tx, id, { status: "REJECTED", rejection_reason: b.reason || "Seller declined the request" });
@@ -719,7 +733,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const id = String((req.params as any).id || "");
       const row = await db.$transaction(async (tx: any) => {
         const rows = await orderFor(tx, id, c, "BUYER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
-        if (await replayEvent(tx, c, b.idempotencyKey)) return o;
+        if (await replayEvent(tx, c, b.idempotencyKey, id, "ORDER_CANCELLED")) return o;
         if (!["SUBMITTED","ACCEPTED"].includes(o.status) || itemsOf(o).some((x) => x.dispatchedQuantity > 0)) throw new Error("ORDER_CANNOT_BE_CANCELLED:" + o.status);
         const updated = await patchOrder(tx, id, { status: "CANCELLED", rejection_reason: b.reason || null });
         if (o.buyer_purchase_order_id) {
@@ -737,7 +751,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const id = String((req.params as any).id || ""), b = Dispatch.parse(req.body);
       const row = await db.$transaction(async (tx: any) => {
         const rows = await orderFor(tx, id, c, "SELLER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
-        if (await replayEvent(tx, c, b.idempotencyKey)) return o;
+        if (await replayEvent(tx, c, b.idempotencyKey, id, "ORDER_DISPATCHED")) return o;
         if (!["ACCEPTED","PARTIALLY_DISPATCHED","PARTIALLY_RECEIVED","IN_TRANSIT"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_DISPATCH:" + o.status);
         if (!o.buyer_purchase_order_id) throw new Error("NATIVE_PURCHASE_ORDER_NOT_FOUND");
         await tx.$queryRawUnsafe(
@@ -836,7 +850,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const b = Transit.parse(req.body), id = String((req.params as any).id || "");
       const row = await db.$transaction(async (tx: any) => {
         const rows = await orderFor(tx, id, c, "SELLER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
-        if (await replayEvent(tx, c, b.idempotencyKey)) return o;
+        if (await replayEvent(tx, c, b.idempotencyKey, id, "ORDER_IN_TRANSIT")) return o;
         if (!["DISPATCHED","PARTIALLY_DISPATCHED"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_TRANSIT:" + o.status);
         const eta = b.eta ? new Date(b.eta) : null;
         const shipmentRows = await tx.$queryRawUnsafe(
@@ -868,7 +882,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const b = Receive.parse(req.body), id = String((req.params as any).id || "");
       const row = await db.$transaction(async (tx: any) => {
         const rows = await orderFor(tx, id, c, "BUYER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
-        if (await replayEvent(tx, c, b.idempotencyKey)) return o;
+        if (await replayEvent(tx, c, b.idempotencyKey, id, "ORDER_RECEIVED")) return o;
         if (!["DISPATCHED","PARTIALLY_DISPATCHED","IN_TRANSIT","PARTIALLY_RECEIVED"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_RECEIPT:" + o.status);
         const items = itemsOf(o), receives: ReceivePortion[] = [];
         if (new Set(b.items.map((x) => x.lineId)).size !== b.items.length) throw new Error("DUPLICATE_ORDER_LINE");
@@ -963,7 +977,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const id = String((req.params as any).id || ""), paymentId = String((req.params as any).paymentId || "");
       const row = await db.$transaction(async (tx: any) => {
         const orders = await orderFor(tx, id, c, "SELLER", true), o = orders[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
-        if (await replayEvent(tx, c, b.idempotencyKey)) return o;
+        if (await replayEvent(tx, c, b.idempotencyKey, id, "PAYMENT_CONFIRMED", { paymentRequestId: paymentId })) return o;
         const pays = await tx.$queryRawUnsafe("SELECT * FROM inter_vertical_payment_requests WHERE id=$1 AND order_id=$2 AND status='PENDING_CONFIRMATION' FOR UPDATE", paymentId, id);
         const p = pays[0]; if (!p) throw new Error("PAYMENT_REQUEST_NOT_FOUND_OR_ALREADY_CONFIRMED");
         const amount = Number(p.amount);
