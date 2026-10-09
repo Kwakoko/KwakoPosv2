@@ -7,6 +7,10 @@ All notable changes to KwakoPos will be documented in this file.
 ## [2.13.0] - 2026-10-09
 
 ### ✨ New Features
+- **platform**: add C01-C11 production lock artifact PLATFORM_SERVICES_PRODUCTION_LOCK_V1.md
+- **platform**: add C01-C11 production lock artifact platform-services-production-lock.test.ts
+- **platform**: add C01-C11 production lock artifact platform-services-production-lock.ts
+- **platform**: add C01-C11 production lock artifact platformServicesProductionLock.ts
 - **sync**: add platform-level Offline Sync Production Lock
 - **support**: close Support Production Lock v1
 - **super-admin**: expose live tenant directory in control tower
@@ -139,6 +143,12 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: incorporate current main WIF validation
+- **core**: Merge remote-tracking branch 'origin/main' into automation/production-lock-final-20261009
+- **core**: add C01-C11 platform services production lock
+- **release**: v2.13.0 protected production candidate
+- **core**: harden security platform and parameterize sync SQL
+- **core**: reconcile Super Admin platform isolation
 - **core**: Merge pull request #175 from Kwakoko/fix/release-exact-main-clean-rebuild
 - **release**: v2.13.0 refresh clean workflow fingerprints
 - **release**: v2.13.0 refresh clean workflow fingerprints
@@ -163,8 +173,29 @@ All notable changes to KwakoPos will be documented in this file.
 - **release**: bind 2.13.0 candidate to exact main SHA
 - **release**: normalize Google Workload Identity Provider
 - **platform**: apply C01-C11 Platform Services Production Lock
+- **platform**: refresh C01-C11 lock evidence boundary
 - **release**: v2.13.0 final security certification repair
+- **platform**: refresh shared lock hashes for current main
+- **platform**: refresh shared lock hashes for current main
+- **platform**: refresh shared lock hashes for current main
+- **platform**: wire C01-C11 lock into exact-main certification
+- **platform**: wire C01-C11 production lock .github/workflows/production-certification.yml
+- **platform**: wire C01-C11 production lock .github/workflows/ci.yml
+- **platform**: wire C01-C11 production lock packages/config/src/index.ts
+- **platform**: wire C01-C11 production lock packages/config/src/releaseCertificationGovernance.ts
+- **platform**: wire C01-C11 production lock packages/config/src/foundationProductionLock.ts
+- **platform**: wire C01-C11 production lock package.json
 - **release**: v2.13.0 production lock convergence
+- **super-admin**: allow legacy role migration lookup while banning creation
+- **lock**: refresh shared server pin after Super Admin hardening
+- **lock**: refresh shared server pin after Super Admin hardening
+- **super-admin**: update certification pillar count for isolation control
+- **lock**: certify Super Admin navigation guard update
+- **super-admin**: narrow lock checks to actual platform bypasses
+- **super-admin**: lock persisted impersonation and shell role regressions
+- **super-admin**: add platform identity isolation regressions
+- **super-admin**: lock hard-coded platform identity regression
+- **super-admin**: certify dedicated platform identity boundary
 - **core**: align Super Admin context and certification expectations
 - **core**: align support control tower with strict platform-role authorization
 - **super-admin**: require explicit production-lock gate wiring
@@ -795,6 +826,14 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **release**: close platform-lock and exact-main certification blockers
+- **certification**: refresh sales dependency fingerprints
+- **release**: align WIF validation with Google resource IDs
+- **certification**: reconcile shared server lock pins
+- **release**: normalize versioned WIF provider URLs
+- **certification**: refresh navigation and package fingerprints
+- **certification**: refresh dependent production lock fingerprints
+- **certification**: reconcile production lock invariants
 - **release**: restore missing GCP WIF provider normalizer
 - **release**: simplify WIF normalization shell safely
 - **release**: correct WIF normalization shell syntax
@@ -802,6 +841,34 @@ All notable changes to KwakoPos will be documented in this file.
 - **release**: keep source candidate manifest pending
 - **release**: keep candidate manifest pending until certification
 - **release**: refresh stale open SemVer release PRs
+- **platform**: make C01-C11 lock a release evidence gate
+- **platform**: make C01-C11 lock a release evidence gate
+- **platform**: make C01-C11 lock a release evidence gate
+- **platform**: align release governance verifier with 16 production gates
+- **navigation**: refresh production lock fingerprints on current mainline
+- **super-admin**: add fail-closed static certification helpers
+- **super-admin**: correct role and session column names
+- **super-admin**: correct device session userId migration identifier
+- **super-admin**: correct all migration column identifiers
+- **super-admin**: align isolation migration with physical camelCase schema
+- **super-admin**: replace procedural migration with plain SQL isolation steps
+- **super-admin**: correct platform isolation migration DO terminator
+- **web**: enforce dedicated platform role in shell controls
+- **web**: remove persisted tenant impersonation bypass
+- **super-admin**: revoke legacy platform tenant sessions during isolation migration
+- **super-admin**: remove hard-coded context-switch identity fallback
+- **super-admin**: remove legacy tenant-role platform route bypass
+- **super-admin**: make production lock enforce platform isolation invariants
+- **super-admin**: add database-enforced platform role isolation
+- **web**: enforce platform-only Super Admin navigation lock
+- **web**: disable tenant impersonation from platform admin context
+- **super-admin**: block platform credentials from tenant app context
+- **super-admin**: enforce platform role isolation in apps/web/src/context/KwakoPosContexts.tsx
+- **super-admin**: enforce platform role isolation in apps/web/src/App.tsx
+- **super-admin**: enforce platform role isolation in apps/api/src/routes/supportControlTowerRoutes.ts
+- **super-admin**: enforce platform role isolation in apps/api/src/routes/tenantOnboardingRoutes.ts
+- **super-admin**: enforce platform role isolation in apps/api/src/services/superAdminSecurityService.ts
+- **super-admin**: enforce platform role isolation in scripts/security/bootstrap-super-admin.ts
 - **super-admin**: apply independent production lock
 - **cash-lock**: refresh schema fingerprint after Super Admin security migration
 - **production-locks**: refresh shared server fingerprint after Super Admin hardening
@@ -1524,6 +1591,29 @@ All notable changes to KwakoPos will be documented in this file.
 
 ### 🛡️ Security Updates
 - **security**: apply Security Platform production lock
+- **mainline**: preserve vulnerability scan and add security lock
+- **mainline**: preserve exact-main release flow and add security lock
+- **mainline**: preserve candidate certification and add security lock
+- **mainline**: preserve current CI locks and add security lock
+- **mainline**: restore current package scripts and add security lock
+- **mainline**: add Security Platform production lock authority
+- **mainline**: add Security Platform production lock authority
+- **mainline**: add Security Platform production lock authority
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
+- **mainline**: replay validated Security Platform lock change
 - **security**: prevent tenant creation of platform super admin roles
 - **security**: make platform audit ledger append-only
 - **security**: harden Super Admin MFA enrollment and global audit
