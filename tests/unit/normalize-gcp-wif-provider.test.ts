@@ -53,6 +53,14 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(run(markedKeywords)).toBe("provider=" + canonical);
   });
 
+
+  it("preserves valid provider identifiers ending in u, e, or f", () => {
+    for (const suffix of ["u", "e", "f"]) {
+      const value = canonical.replace("5provider", "valid-provider" + suffix);
+      expect(run(value)).toBe("provider=" + value);
+    }
+  });
+
   it("never removes format marks embedded in project, pool, or provider identifiers", () => {
     expect(() => run(canonical.replace("123456789012", "1234\u200b56789012"))).toThrow();
     expect(() => run(canonical.replace("1234-pool", "1234-\u200bpool"))).toThrow();
