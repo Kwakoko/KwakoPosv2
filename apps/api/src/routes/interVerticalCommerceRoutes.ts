@@ -77,9 +77,15 @@ function ctxOf(req: FastifyRequest): Ctx {
   return c as Ctx;
 }
 function permission(ctx: Ctx, ...names: string[]): void {
-  const roles = (ctx.roles || []).map((v: unknown) => String(v).toUpperCase());
-  const permissions = new Set((ctx.permissions || []).map((v: unknown) => String(v).toLowerCase().trim()));
-  if (roles.some((r: string) => ["OWNER","ADMIN","SUPER_ADMIN","SUPERADMIN","MANAGER","BRANCH_MANAGER"].includes(r)) || permissions.has("*") || permissions.has("admin:*") || names.some((n) => permissions.has(n.toLowerCase()))) return;
+  const roles = (ctx.roles || []).map((v: unknown) => String(v).trim().toUpperCase());
+  const permissions = new Set((ctx.permissions || []).map((v: unknown) => String(v).trim().toLowerCase()));
+  const permissionMatches = names.some((name) => {
+    const normalized = name.trim().toLowerCase();
+    return permissions.has(normalized)
+      || permissions.has(normalized.replace(/[.-]/g, "_"))
+      || permissions.has(normalized.replace(/_/g, "."));
+  });
+  if (roles.some((r: string) => ["OWNER","ADMIN","SUPER_ADMIN","SUPERADMIN","MANAGER","BRANCH_MANAGER"].includes(r)) || permissions.has("*") || permissions.has("admin:*") || permissionMatches) return;
   throw new Error("FORBIDDEN: Required business permission is missing");
 }
 function itemsOf(row: any): Item[] {
