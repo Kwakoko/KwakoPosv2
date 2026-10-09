@@ -62,7 +62,7 @@ function comparePrereleaseIdentifiers(left: string, right: string): number {
   }
   if (leftNumeric && !rightNumeric) return -1;
   if (!leftNumeric && rightNumeric) return 1;
-  return left.localeCompare(right);
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function comparePrerelease(left?: string, right?: string): number {
