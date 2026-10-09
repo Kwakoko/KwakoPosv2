@@ -372,7 +372,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const variants = await db.productVariant.findMany({ where: { id: { in: b.items.map((x) => x.sellerVariantId) }, tenantId: link.seller_tenant_id, branchId: link.seller_branch_id, isActive: true }, include: { product: { select: { name: true, sku: true } } } });
       if (variants.length !== b.items.length) throw new Error("SELLER_VARIANT_BOUNDARY_OR_NOT_FOUND");
       const localMatches = await db.productVariant.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, sku: { in: variants.map((v: any) => String(v.sku)) }, isActive: true }, select: { id: true, sku: true } });
-      const localBySku = new Map(localMatches.map((v: any) => [String(v.sku), String(v.id)]));
+      const localBySku = new Map<string, string>(localMatches.map((v: any): [string, string] => [String(v.sku), String(v.id)]));
       const byId = new Map(variants.map((v: any) => [String(v.id), v]));
       const items: Item[] = b.items.map((x) => {
         const v: any = byId.get(x.sellerVariantId);
@@ -620,11 +620,11 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         if (prior.length) return prior[0];
         if (!["PARTIALLY_RECEIVED","RECEIVED"].includes(o.status)) throw new Error("PAYMENT_REQUIRES_RECEIVED_GOODS");
         if (b.amount > (await openFinance(tx, id, "BUYER")) + 0.005 || b.amount > (await openFinance(tx, id, "SELLER")) + 0.005) throw new Error("PAYMENT_EXCEEDS_ORDER_OPEN_BALANCE");
-        const rows = await tx.$queryRawUnsafe("INSERT INTO inter_vertical_payment_requests (id,order_id,tenant_id,branch_id,submitted_by_user_id,amount,payment_method,provider,provider_reference,notes,idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *",
+        const insertedRows = await tx.$queryRawUnsafe("INSERT INTO inter_vertical_payment_requests (id,order_id,tenant_id,branch_id,submitted_by_user_id,amount,payment_method,provider,provider_reference,notes,idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *",
           randomUUID(), id, c.tenantId, c.branchId, c.userId, b.amount, b.paymentMethod, b.provider || null, b.providerReference || null, b.notes, b.idempotencyKey);
         await patchOrder(tx, id, { finance_status: "PAYMENT_PENDING" });
-        await event(tx, id, c, "PAYMENT_SUBMITTED", o.status, o.status, b.idempotencyKey, { paymentRequestId: rows[0].id, amount: b.amount });
-        return rows[0];
+        await event(tx, id, c, "PAYMENT_SUBMITTED", o.status, o.status, b.idempotencyKey, { paymentRequestId: insertedRows[0].id, amount: b.amount });
+        return insertedRows[0];
       });
       return reply.status(201).send({ success: true, data: { id: result.id, orderId: result.order_id, amount: Number(result.amount), paymentMethod: result.payment_method, provider: result.provider, providerReference: result.provider_reference, notes: result.notes, status: result.status, createdAt: result.created_at } });
     } catch (e) { return errorReply(reply, e); }
