@@ -19,7 +19,7 @@ export interface SemVerComponents {
 }
 
 const SEMVER_REGEX =
-  /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+  /^v?(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$/;
 
 export function parseSemVer(versionStr: string): SemVerComponents {
   const match = versionStr.trim().match(SEMVER_REGEX);
@@ -51,11 +51,14 @@ export function formatSemVer(components: SemVerComponents): string {
 }
 
 function comparePrereleaseIdentifiers(left: string, right: string): number {
-  const leftNumeric = /^\d+$/.test(left);
-  const rightNumeric = /^\d+$/.test(right);
+  const leftNumeric = /^\\d+$/.test(left);
+  const rightNumeric = /^\\d+$/.test(right);
 
   if (leftNumeric && rightNumeric) {
-    return Number(left) - Number(right);
+    // SemVer numeric identifiers are arbitrary precision. Comparing via Number()
+    // loses ordering above Number.MAX_SAFE_INTEGER (and may yield NaN for Infinity - Infinity).
+    if (left.length !== right.length) return left.length - right.length;
+    return left < right ? -1 : left > right ? 1 : 0;
   }
   if (leftNumeric && !rightNumeric) return -1;
   if (!leftNumeric && rightNumeric) return 1;
@@ -116,11 +119,11 @@ export function categorizeCommit(type: string, isBreaking: boolean): ParsedCommi
 
 export function parseConventionalCommit(message: string): ParsedCommit {
   const trimmed = message.trim();
-  const firstLine = trimmed.split("\n")[0].trim();
-  const rest = trimmed.split("\n").slice(1).join("\n").trim();
+  const firstLine = trimmed.split("\\n")[0].trim();
+  const rest = trimmed.split("\\n").slice(1).join("\\n").trim();
 
-  const isBreakingFooter = /BREAKING[ -]CHANGE:\s*(.+)/i.test(trimmed);
-  const headerMatch = firstLine.match(/^([a-zA-Z]+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/);
+  const isBreakingFooter = /BREAKING[ -]CHANGE:\\s*(.+)/i.test(trimmed);
+  const headerMatch = firstLine.match(/^([a-zA-Z]+)(?:\\(([^)]+)\\))?(!)?:\\s*(.+)$/);
 
   if (!headerMatch) {
     const isBreaking = isBreakingFooter;
@@ -212,7 +215,7 @@ export function generateFormattedReleaseNotes(
   commits: ParsedCommit[]
 ): string {
   const dateStr = new Date().toISOString().split("T")[0];
-  let notes = `## [${version}] - ${dateStr}\n\n`;
+  let notes = `## [${version}] - ${dateStr}\\n\\n`;
 
   const categories: Array<ParsedCommit["category"]> = [
     "Breaking Changes",
@@ -228,15 +231,15 @@ export function generateFormattedReleaseNotes(
   for (const cat of categories) {
     const items = commits.filter((c) => c.category === cat);
     if (items.length > 0) {
-      notes += `### ${cat}\n`;
+      notes += `### ${cat}\\n`;
       for (const item of items) {
         const scopeStr = item.scope ? `**${item.scope}**: ` : "";
-        notes += `- ${scopeStr}${item.subject}\n`;
+        notes += `- ${scopeStr}${item.subject}\\n`;
       }
-      notes += "\n";
+      notes += "\\n";
     }
   }
 
-  notes += `*Baseline Tag*: \`${baselineTag}\`\n`;
+  notes += `*Baseline Tag*: \\`${baselineTag}\\`\\n`;
   return notes.trim();
 }
