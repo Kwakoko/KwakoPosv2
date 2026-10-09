@@ -442,6 +442,9 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         if (o.status !== "SUBMITTED") throw new Error("ORDER_INVALID_STATUS:" + o.status);
         if (b.action === "REJECT") {
           const updated = await patchOrder(tx, id, { status: "REJECTED", rejection_reason: b.reason || "Seller declined the request" });
+          if (o.buyer_purchase_order_id) {
+            await tx.purchaseOrder.updateMany({ where: { id: o.buyer_purchase_order_id, tenantId: o.buyer_tenant_id, branchId: o.buyer_branch_id, status: "DRAFT" }, data: { status: "CANCELLED", notes: "Inter-Vertical order " + o.order_number + " rejected by seller: " + (b.reason || "Seller declined the request") } });
+          }
           await event(tx, id, c, "ORDER_REJECTED", o.status, "REJECTED", b.idempotencyKey, { reason: b.reason }); return updated;
         }
         const items = itemsOf(o), overrides = new Map((b.items || []).map((x) => [x.lineId, x]));
@@ -465,6 +468,20 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         const customer = await tx.customer.findFirst({ where: { id: o.seller_customer_id, tenantId: c.tenantId, branchId: c.branchId } });
         if (!customer) throw new Error("COUNTERPARTY_FINANCE_MAPPING_NOT_FOUND");
         if (Number(customer.currentBalance || 0) + total > Number(customer.creditLimit || 0) + 0.005) throw new Error("SELLER_CREDIT_LIMIT_EXCEEDED");
+        const buyerPo = await tx.purchaseOrder.findFirst({ where: { id: o.buyer_purchase_order_id, tenantId: o.buyer_tenant_id, branchId: o.buyer_branch_id }, include: { items: true } });
+        if (!buyerPo) throw new Error("NATIVE_PURCHASE_ORDER_NOT_FOUND");
+        for (const item of items) {
+          const poItem = buyerPo.items.find((x: any) => x.variantId === item.buyerVariantId);
+          if (!poItem) throw new Error("NATIVE_PURCHASE_ORDER_LINE_NOT_FOUND");
+          await tx.purchaseOrderItem.update({ where: { id: poItem.id }, data: {
+            quantityOrdered: Number(item.acceptedQuantity), quantityReceived: 0,
+            unitCost: Number(item.unitPrice), totalCost: Number(item.acceptedQuantity) * Number(item.unitPrice),
+          } });
+        }
+        await tx.purchaseOrder.update({ where: { id: buyerPo.id }, data: {
+          status: "APPROVED", totalAmount: total,
+          notes: [buyerPo.notes, "Wholesale accepted Inter-Vertical order " + o.order_number].filter(Boolean).join(" | "),
+        } });
         const updated = await patchOrder(tx, id, { status: "ACCEPTED", accepted_by_user_id: c.userId, items, total_amount: total });
         await event(tx, id, c, "ORDER_ACCEPTED", o.status, "ACCEPTED", b.idempotencyKey, { totalAmount: total, items: items.map((i) => ({ lineId: i.lineId, quantity: i.acceptedQuantity, unitPrice: i.unitPrice })) });
         return updated;
@@ -483,6 +500,9 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         if (await replayEvent(tx, c, b.idempotencyKey)) return o;
         if (!["SUBMITTED","ACCEPTED"].includes(o.status) || itemsOf(o).some((x) => x.dispatchedQuantity > 0)) throw new Error("ORDER_CANNOT_BE_CANCELLED:" + o.status);
         const updated = await patchOrder(tx, id, { status: "CANCELLED", rejection_reason: b.reason || null });
+        if (o.buyer_purchase_order_id) {
+          await tx.purchaseOrder.updateMany({ where: { id: o.buyer_purchase_order_id, tenantId: o.buyer_tenant_id, branchId: o.buyer_branch_id, status: { in: ["DRAFT", "APPROVED"] } }, data: { status: "CANCELLED", notes: "Inter-Vertical order " + o.order_number + " cancelled by buyer: " + (b.reason || "Cancelled") } });
+        }
         await event(tx, id, c, "ORDER_CANCELLED", o.status, "CANCELLED", b.idempotencyKey, { reason: b.reason }); return updated;
       });
       return reply.send({ success: true, data: orderDto(row) });
