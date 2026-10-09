@@ -81,7 +81,7 @@ POST /api/v1/inter-vertical/orders
 
 ## Example: seller acceptance
 
-The seller can confirm order quantities and unit prices. Omitted lines use requested quantities and the seller variant's current price.
+The seller can confirm order quantities. Omitted lines use requested quantities. Pricing is resolved server-side through the existing PricingAuthority, including customer-specific prices, promotions, wholesale tiers, bulk tiers and price lists. A supplied override price is accepted only when the normal price-override permissions and a reason are present. A seller must have enough remaining B2B customer credit for the accepted total.
 
 POST /api/v1/inter-vertical/orders/:id/respond
 
@@ -124,5 +124,6 @@ POST /api/v1/inter-vertical/orders/:id/receive
 - Buyer receipt creates a native PurchaseReceipt, stock-ledger movements, supplier payable balance, and general-ledger journal. Received quantities are valued at seller-accepted prices.
 - Payment requests do not modify balances. Seller confirmation writes buyer supplier payment and seller customer payment records, updates payable/receivable balances and invoice allocation, and writes both journals in a single database transaction.
 - Shipment tracking is stored in the gateway logistics snapshot in this first iteration; it does not create a record in the separate supply-chain shipment subsystem.
+- Settlement request methods currently support bank transfer and mobile money only, because those can be reconciled without bypassing cash-session controls. Cash, card and other methods are intentionally not exposed in this gateway flow.
 - B2B invoice tax is currently zero. Tax calculation and fiscalization must be wired to each business's configured tax policies before VAT-bearing production transactions are enabled.
 - Mutations require the appropriate business permissions or an authorized managerial role.
