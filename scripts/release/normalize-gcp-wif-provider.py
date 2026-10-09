@@ -136,8 +136,25 @@ def normalize(value: str) -> str:
         match = RESOURCE_LAYOUT.fullmatch(provider)
 
     if match is None:
-        # Only shape metadata is logged. Never echo secret contents or IDs.
+        # Log only structural metadata and code points from the fixed first
+        # keyword slot; never emit raw provider strings or identifier segments.
         segments = [segment for segment in provider.split("/") if segment]
+        first_keyword = segments[0] if segments else ""
+        non_ascii_codepoints = [
+            f"U+{ord(character):04X}@{index}"
+            for index, character in enumerate(first_keyword[:32])
+            if ord(character) > 127
+        ][:16]
+        non_alpha_positions = [
+            str(index)
+            for index, character in enumerate(first_keyword[:32])
+            if ord(character) < 128 and not character.isalpha()
+        ][:16]
+        keyword_shape = (
+            f"first_keyword_length={len(first_keyword)}, "
+            f"first_keyword_non_ascii={','.join(non_ascii_codepoints) or 'none'}, "
+            f"first_keyword_nonalpha_positions={','.join(non_alpha_positions) or 'none'}"
+        )
         markers = {
             "starts_projects": bool(segments and segments[0] == "projects"),
             "has_locations": "locations" in segments,
@@ -152,7 +169,8 @@ def normalize(value: str) -> str:
         raise ValueError(
             "provider path must use projects/<project-number>/locations/global/"
             "workloadIdentityPools/<pool-id>/providers/<provider-id>; "
-            f"safe_shape_diagnostic: segments={len(segments)}, {shape}; provider value omitted"
+            f"safe_shape_diagnostic: segments={len(segments)}, {shape}, {keyword_shape}; "
+            "provider value omitted"
         )
 
     project_number, pool_id, provider_id = match.groups()
