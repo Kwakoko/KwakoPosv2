@@ -11,6 +11,7 @@ import { traVfdRoutes } from "./routes/traVfdRoutes.js";
 import { globalSettingsService } from "./services/settingsService.js";
 import { startTraVfdReconciliationWorker } from "./services/traVfdService.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
+import { interVerticalCommerceRoutes } from "./routes/interVerticalCommerceRoutes.js";
 import { legalGovernanceRoutes } from "./routes/legalGovernanceRoutes.js";
 import { globalLegalGovernanceService } from "./services/legalGovernanceService.js";
 import { rollbackAuthorizationRoutes } from "./routes/rollbackAuthorizationRoutes.js";
@@ -7116,6 +7117,7 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     return reply.status(201).send({ success: true, data: candidate });
   });
 
+  interVerticalCommerceRoutes(server);
   tenantOnboardingRoutes(server);
   legalGovernanceRoutes(server);
   rollbackAuthorizationRoutes(server);
