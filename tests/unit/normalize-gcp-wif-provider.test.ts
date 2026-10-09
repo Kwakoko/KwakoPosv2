@@ -62,7 +62,7 @@ describe("Google Workload Identity Provider normalization", () => {
 
   it("normalizes invisible Unicode separator and combining marks in fixed keywords only", () => {
     const invisibleKeywords =
-      "pro\\u034fjects/123456789012/locations/global/workloadIdentity\\u200ePools/1234-pool/provi\\u00a0ders/5provider";
+      "pro\u034fjects/123456789012/locations/global/workloadIdentity\u200ePools/1234-pool/provi\u00a0ders/5provider";
     expect(run(invisibleKeywords)).toBe("provider=" + canonical);
     const compatibilityKeywords =
       "ｐrojects/123456789012/locations/global/workloadIdentityPools/1234-pool/providers/5provider";
