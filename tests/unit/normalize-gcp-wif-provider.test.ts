@@ -32,6 +32,12 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(run(canonical)).toBe("provider=" + canonical);
   });
 
+  it("canonicalizes case variants of resource keywords without changing IDs", () => {
+    const mixedCase =
+      "PROJECTS/123456789012/LOCATIONS/GLOBAL/WORKLOADIDENTITYPOOLS/1234-pool/PROVIDERS/5provider";
+    expect(run(mixedCase)).toBe("provider=" + canonical);
+  });
+
   it("normalizes supported HTTPS and scheme-less IAM URL forms", () => {
     expect(run("https://iam.googleapis.com/" + canonical)).toBe("provider=" + canonical);
     expect(run("//iam.googleapis.com/" + canonical + "/")).toBe("provider=" + canonical);

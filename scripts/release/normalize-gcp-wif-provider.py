@@ -39,6 +39,26 @@ def normalize(value: str) -> str:
     provider = re.sub(r"^(?:v1beta1?|v1)/", "", provider, flags=re.IGNORECASE)
     provider = provider.rstrip("/").strip()
 
+    # The configured legacy resource has the expected eight path segments and
+    # required marker order, but its first resource-type keyword is not lower
+    # case. Canonicalize only resource-type keywords at their fixed positions;
+    # never case-fold the project number, pool ID, or provider ID.
+    segments = provider.split("/")
+    if (
+        len(segments) == 8
+        and segments[2].casefold() == "locations"
+        and segments[3].casefold() == "global"
+        and segments[4].casefold() == "workloadidentitypools"
+        and segments[6].casefold() == "providers"
+        and segments[0].casefold() == "projects"
+    ):
+        segments[0] = "projects"
+        segments[2] = "locations"
+        segments[3] = "global"
+        segments[4] = "workloadIdentityPools"
+        segments[6] = "providers"
+        provider = "/".join(segments)
+
     match = RESOURCE_LAYOUT.fullmatch(provider)
     if match is None:
         # Only shape metadata is logged. Never echo secret contents or IDs.
