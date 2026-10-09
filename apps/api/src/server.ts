@@ -6799,8 +6799,228 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     return reply.status(200).send({ success: true, data: result });
   });
 
-  // Shipment/receiving records belong to the dedicated logistics subsystem; do not expose the legacy in-memory engine as production authority.
-  server.post("/api/v1/supply-chain/shipments", async (_req, reply) => reply.status(501).send({ success: false, error: { code: "SUPPLY_CHAIN_PERSISTENCE_REQUIRED", message: "Shipment persistence is not enabled in the production PostgreSQL model." } }));
+  const supplyShipmentStatuses = ["PLANNED","CONFIRMED","IN_TRANSIT","ARRIVED","RECEIVING","RECEIVED","EXCEPTION","CANCELLED"] as const;
+  const supplyShipmentRoleAllowed = (ctx: any, write: boolean) => {
+    const roles = (ctx?.roles || []).map((x: unknown) => String(x).trim().toUpperCase());
+    const permissions = new Set((ctx?.permissions || []).map((x: unknown) => String(x).trim().toLowerCase()));
+    const manager = roles.some((x: string) => ["OWNER","ADMIN","SUPER_ADMIN","SUPERADMIN","MANAGER","BRANCH_MANAGER"].includes(x));
+    if (manager || permissions.has("*") || permissions.has("admin:*")) return true;
+    return write
+      ? ["purchase.manage","purchasing.manage","purchase.create","purchasing.create","purchase.receive","purchases.receive","inventory.transfer"].some((x) => permissions.has(x))
+      : ["purchase.view","purchasing.view","purchase.manage","purchasing.manage","inventory.view","inventory.transfer"].some((x) => permissions.has(x));
+  };
+  const supplyShipmentDto = (row: any, lines: any[]) => ({
+    shipmentId: row.id, tenantId: row.tenant_id, branchId: row.branch_id, poId: row.po_id,
+    supplierId: row.supplier_id, gatewayOrderId: row.gateway_order_id || undefined,
+    sourceTenantId: row.source_tenant_id || undefined, sourceBranchId: row.source_branch_id || undefined,
+    carrierName: row.carrier_name, trackingNumber: row.tracking_number || undefined, status: row.status,
+    supplierEta: new Date(row.supplier_eta).toISOString(),
+    carrierEta: row.carrier_eta ? new Date(row.carrier_eta).toISOString() : undefined,
+    actualArrivalDate: row.actual_arrival_date ? new Date(row.actual_arrival_date).toISOString() : undefined,
+    destinationWarehouseId: row.destination_warehouse_id || undefined,
+    lines: lines.map((x: any) => ({
+      lineId: x.id, gatewayLineId: x.gateway_line_id || undefined,
+      productId: x.product_id || undefined, buyerVariantId: x.buyer_variant_id || undefined,
+      sellerVariantId: x.seller_variant_id || undefined, sku: x.sku, description: x.description,
+      quantityShipped: Number(x.quantity_shipped), quantityReceived: Number(x.quantity_received || 0),
+      unitPrice: Number(x.unit_price || 0), netAmount: Number(x.net_amount || 0),
+      taxRatePct: Number(x.tax_rate_pct || 0), taxInclusive: Boolean(x.tax_inclusive),
+      taxAmount: Number(x.tax_amount || 0), grossAmount: Number(x.gross_amount || 0),
+    })),
+    etaDelayDays: 0, createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+  });
+  const getScopedSupplyShipment = async (runner: any, ctx: any, shipmentId: string) => {
+    const rows = await runner.$queryRawUnsafe(
+      "SELECT * FROM supply_chain_shipments WHERE id=$1 AND tenant_id=$2 AND branch_id=$3",
+      shipmentId, ctx.tenantId, ctx.branchId,
+    );
+    if (!rows.length) return null;
+    const lines = await runner.$queryRawUnsafe(
+      "SELECT * FROM supply_chain_shipment_lines WHERE shipment_id=$1 ORDER BY created_at,id", shipmentId,
+    );
+    return supplyShipmentDto(rows[0], lines);
+  };
+
+  server.get("/api/v1/supply-chain/shipments", async (req, reply) => {
+    try {
+      const ctx = req.tenantContext;
+      if (!ctx?.tenantId || !ctx?.branchId) return reply.status(401).send({ success: false, error: { code: "TENANT_BRANCH_CONTEXT_REQUIRED" } });
+      if (!supplyShipmentRoleAllowed(ctx, false)) return reply.status(403).send({ success: false, error: { code: "FORBIDDEN" } });
+      const query = z.object({ status: z.enum(supplyShipmentStatuses).optional(), poId: z.string().trim().min(1).optional() }).parse(req.query || {});
+      let sql = "SELECT * FROM supply_chain_shipments WHERE tenant_id=$1 AND branch_id=$2";
+      const values: any[] = [ctx.tenantId, ctx.branchId];
+      if (query.status) { values.push(query.status); sql += " AND status=$" + values.length; }
+      if (query.poId) { values.push(query.poId); sql += " AND po_id=$" + values.length; }
+      sql += " ORDER BY created_at DESC LIMIT 200";
+      const rows = await prisma.$queryRawUnsafe(sql, ...values);
+      const data = await Promise.all(rows.map(async (row: any) => {
+        const lines = await prisma.$queryRawUnsafe("SELECT * FROM supply_chain_shipment_lines WHERE shipment_id=$1 ORDER BY created_at,id", row.id);
+        return supplyShipmentDto(row, lines);
+      }));
+      return reply.send({ success: true, data });
+    } catch (error: any) {
+      return reply.status(400).send({ success: false, error: { code: "SHIPMENT_QUERY_INVALID", message: error?.message || "Unable to list shipments" } });
+    }
+  });
+
+  server.get("/api/v1/supply-chain/shipments/:id", async (req, reply) => {
+    try {
+      const ctx = req.tenantContext;
+      if (!ctx?.tenantId || !ctx?.branchId) return reply.status(401).send({ success: false, error: { code: "TENANT_BRANCH_CONTEXT_REQUIRED" } });
+      if (!supplyShipmentRoleAllowed(ctx, false)) return reply.status(403).send({ success: false, error: { code: "FORBIDDEN" } });
+      const data = await getScopedSupplyShipment(prisma, ctx, String((req.params as any).id || ""));
+      if (!data) return reply.status(404).send({ success: false, error: { code: "SHIPMENT_NOT_FOUND" } });
+      const events = await prisma.$queryRawUnsafe(
+        "SELECT action,from_status,to_status,payload,created_at FROM supply_chain_shipment_events WHERE shipment_id=$1 AND tenant_id=$2 AND branch_id=$3 ORDER BY created_at",
+        data.shipmentId, ctx.tenantId, ctx.branchId,
+      );
+      return reply.send({ success: true, data: { ...data, events: events.map((x: any) => ({
+        action: x.action, fromStatus: x.from_status, toStatus: x.to_status, payload: x.payload, createdAt: new Date(x.created_at).toISOString(),
+      })) } });
+    } catch (error: any) {
+      return reply.status(400).send({ success: false, error: { code: "SHIPMENT_QUERY_INVALID", message: error?.message || "Unable to read shipment" } });
+    }
+  });
+
+  server.post("/api/v1/supply-chain/shipments", async (req, reply) => {
+    try {
+      const ctx = req.tenantContext;
+      if (!ctx?.tenantId || !ctx?.branchId || !ctx?.userId) return reply.status(401).send({ success: false, error: { code: "TENANT_BRANCH_CONTEXT_REQUIRED" } });
+      if (!supplyShipmentRoleAllowed(ctx, true)) return reply.status(403).send({ success: false, error: { code: "FORBIDDEN" } });
+      const body = z.object({
+        poId: z.string().trim().min(1), supplierId: z.string().trim().min(1),
+        carrierName: z.string().trim().min(1).max(200), trackingNumber: z.string().trim().max(200).optional(),
+        status: z.enum(["PLANNED","CONFIRMED"]).default("PLANNED"),
+        supplierEta: z.string().datetime(), carrierEta: z.string().datetime().optional(),
+        destinationWarehouseId: z.string().trim().min(1).optional(),
+        idempotencyKey: z.string().trim().min(8).max(200),
+        lines: z.array(z.object({
+          buyerVariantId: z.string().trim().min(1), productId: z.string().trim().min(1),
+          sku: z.string().trim().min(1).max(200), description: z.string().trim().min(1).max(500),
+          quantityShipped: z.number().positive().finite(), unitPrice: z.number().nonnegative().finite().default(0),
+        })).min(1).max(100),
+      }).parse(req.body);
+      if (new Set(body.lines.map((x) => x.buyerVariantId)).size !== body.lines.length) {
+        return reply.status(400).send({ success: false, error: { code: "DUPLICATE_SHIPMENT_LINE" } });
+      }
+      const shipmentId = await prisma.$transaction(async (tx: any) => {
+        const duplicate = await tx.$queryRawUnsafe(
+          "SELECT id FROM supply_chain_shipments WHERE tenant_id=$1 AND branch_id=$2 AND idempotency_key=$3",
+          ctx.tenantId, ctx.branchId, body.idempotencyKey,
+        );
+        if (duplicate.length) return duplicate[0].id;
+        const lockedPo = await tx.$queryRawUnsafe(
+          'SELECT id FROM purchase_orders WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 FOR UPDATE',
+          body.poId, ctx.tenantId, ctx.branchId,
+        );
+        if (!lockedPo.length) throw new Error("PURCHASE_ORDER_NOT_FOUND_OR_FORBIDDEN");
+        const po = await tx.purchaseOrder.findFirst({
+          where: { id: body.poId, tenantId: ctx.tenantId, branchId: ctx.branchId },
+          include: { items: true },
+        });
+        if (!po || ["CANCELLED","REJECTED"].includes(po.status)) throw new Error("PURCHASE_ORDER_NOT_SHIPPABLE");
+        if (po.supplierId !== body.supplierId) throw new Error("SHIPMENT_SUPPLIER_MISMATCH");
+        const supplier = await tx.supplier.findFirst({
+          where: { id: body.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" },
+          select: { id: true },
+        });
+        if (!supplier) throw new Error("SUPPLIER_NOT_FOUND_OR_FORBIDDEN");
+        for (const line of body.lines) {
+          const variant = await tx.productVariant.findFirst({
+            where: { id: line.buyerVariantId, tenantId: ctx.tenantId, branchId: ctx.branchId, productId: line.productId, isActive: true },
+            select: { id: true },
+          });
+          if (!variant) throw new Error("SHIPMENT_VARIANT_BOUNDARY_OR_NOT_FOUND");
+          const poItem = po.items.find((x: any) => x.variantId === line.buyerVariantId);
+          if (!poItem) throw new Error("SHIPMENT_VARIANT_NOT_IN_PURCHASE_ORDER");
+          const shippedRows = await tx.$queryRawUnsafe(
+            "SELECT COALESCE(SUM(l.quantity_shipped),0) AS quantity FROM supply_chain_shipment_lines l JOIN supply_chain_shipments s ON s.id=l.shipment_id WHERE s.tenant_id=$1 AND s.branch_id=$2 AND s.po_id=$3 AND s.status<>'CANCELLED' AND l.buyer_variant_id=$4",
+            ctx.tenantId, ctx.branchId, po.id, line.buyerVariantId,
+          );
+          const alreadyShipped = Number(shippedRows[0]?.quantity || 0);
+          if (alreadyShipped + line.quantityShipped > Number(poItem.quantityOrdered) + 0.0001) throw new Error("SHIPMENT_EXCEEDS_PURCHASE_ORDER_QUANTITY");
+        }
+        const id = randomUUID();
+        await tx.$executeRawUnsafe(
+          "INSERT INTO supply_chain_shipments (id,tenant_id,branch_id,po_id,supplier_id,carrier_name,tracking_number,status,supplier_eta,carrier_eta,destination_warehouse_id,created_by_user_id,idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+          id, ctx.tenantId, ctx.branchId, body.poId, body.supplierId, body.carrierName, body.trackingNumber || null,
+          body.status, new Date(body.supplierEta), body.carrierEta ? new Date(body.carrierEta) : null,
+          body.destinationWarehouseId || null, ctx.userId, body.idempotencyKey,
+        );
+        for (const line of body.lines) {
+          await tx.$executeRawUnsafe(
+            "INSERT INTO supply_chain_shipment_lines (id,shipment_id,buyer_variant_id,product_id,sku,description,quantity_shipped,unit_price) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+            randomUUID(), id, line.buyerVariantId, line.productId, line.sku, line.description, line.quantityShipped, line.unitPrice,
+          );
+        }
+        await tx.$executeRawUnsafe(
+          "INSERT INTO supply_chain_shipment_events (id,shipment_id,tenant_id,branch_id,actor_user_id,action,from_status,to_status,idempotency_key,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)",
+          randomUUID(), id, ctx.tenantId, ctx.branchId, ctx.userId, "SHIPMENT_CREATED", null, body.status,
+          "shipment-created:" + body.idempotencyKey, JSON.stringify({ poId: body.poId, supplierId: body.supplierId, lineCount: body.lines.length }),
+        );
+        return id;
+      });
+      const data = await getScopedSupplyShipment(prisma, ctx, shipmentId);
+      return reply.status(201).send({ success: true, data });
+    } catch (error: any) {
+      const message = error?.message || "SUPPLY_CHAIN_SHIPMENT_FAILED";
+      const status = /FORBIDDEN|BOUNDARY/.test(message) ? 403 : /NOT_FOUND/.test(message) ? 404 : /EXCEEDS|MISMATCH|NOT_SHIPPABLE|NOT_IN_PURCHASE_ORDER/.test(message) ? 409 : 400;
+      return reply.status(status).send({ success: false, error: { code: message.split(":")[0], message } });
+    }
+  });
+
+  server.post("/api/v1/supply-chain/shipments/:id/status", async (req, reply) => {
+    try {
+      const ctx = req.tenantContext;
+      if (!ctx?.tenantId || !ctx?.branchId || !ctx?.userId) return reply.status(401).send({ success: false, error: { code: "TENANT_BRANCH_CONTEXT_REQUIRED" } });
+      if (!supplyShipmentRoleAllowed(ctx, true)) return reply.status(403).send({ success: false, error: { code: "FORBIDDEN" } });
+      const id = String((req.params as any).id || "");
+      const body = z.object({
+        status: z.enum(supplyShipmentStatuses), idempotencyKey: z.string().trim().min(8).max(200),
+        trackingNumber: z.string().trim().max(200).optional(), carrierName: z.string().trim().max(200).optional(),
+        carrierEta: z.string().datetime().optional(), actualArrivalDate: z.string().datetime().optional(),
+        notes: z.string().trim().max(1000).optional(),
+      }).parse(req.body);
+      await prisma.$transaction(async (tx: any) => {
+        const replay = await tx.$queryRawUnsafe(
+          "SELECT shipment_id FROM supply_chain_shipment_events WHERE tenant_id=$1 AND branch_id=$2 AND idempotency_key=$3",
+          ctx.tenantId, ctx.branchId, body.idempotencyKey,
+        );
+        if (replay.length) {
+          if (replay[0].shipment_id !== id) throw new Error("IDEMPOTENCY_KEY_ALREADY_USED");
+          return;
+        }
+        const rows = await tx.$queryRawUnsafe(
+          "SELECT * FROM supply_chain_shipments WHERE id=$1 AND tenant_id=$2 AND branch_id=$3 FOR UPDATE",
+          id, ctx.tenantId, ctx.branchId,
+        );
+        const shipment = rows[0]; if (!shipment) throw new Error("SHIPMENT_NOT_FOUND");
+        const transitions: Record<string, string[]> = {
+          PLANNED: ["CONFIRMED","CANCELLED"], CONFIRMED: ["IN_TRANSIT","CANCELLED"],
+          IN_TRANSIT: ["ARRIVED","RECEIVING","EXCEPTION","CANCELLED"], ARRIVED: ["RECEIVING","RECEIVED","EXCEPTION"],
+          RECEIVING: ["RECEIVED","EXCEPTION"], EXCEPTION: ["RECEIVING","CANCELLED"], RECEIVED: [], CANCELLED: [],
+        };
+        if (!transitions[shipment.status]?.includes(body.status)) throw new Error("SHIPMENT_INVALID_STATUS_TRANSITION");
+        const changed = await tx.$queryRawUnsafe(
+          "UPDATE supply_chain_shipments SET status=$4,tracking_number=COALESCE($5,tracking_number),carrier_name=COALESCE($6,carrier_name),carrier_eta=COALESCE($7,carrier_eta),actual_arrival_date=CASE WHEN $4 IN ('ARRIVED','RECEIVING','RECEIVED') THEN COALESCE($8,actual_arrival_date,now()) ELSE actual_arrival_date END,updated_at=now() WHERE id=$1 AND tenant_id=$2 AND branch_id=$3 RETURNING id",
+          id, ctx.tenantId, ctx.branchId, body.status, body.trackingNumber ?? null, body.carrierName ?? null,
+          body.carrierEta ? new Date(body.carrierEta) : null, body.actualArrivalDate ? new Date(body.actualArrivalDate) : null,
+        );
+        if (!changed.length) throw new Error("SHIPMENT_NOT_FOUND");
+        await tx.$executeRawUnsafe(
+          "INSERT INTO supply_chain_shipment_events (id,shipment_id,tenant_id,branch_id,actor_user_id,action,from_status,to_status,idempotency_key,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)",
+          randomUUID(), id, ctx.tenantId, ctx.branchId, ctx.userId, "SHIPMENT_STATUS_CHANGED", shipment.status, body.status,
+          body.idempotencyKey, JSON.stringify({ trackingNumber: body.trackingNumber, carrierName: body.carrierName, carrierEta: body.carrierEta, notes: body.notes }),
+        );
+      });
+      return reply.send({ success: true, data: await getScopedSupplyShipment(prisma, ctx, id) });
+    } catch (error: any) {
+      const message = error?.message || "SHIPMENT_STATUS_UPDATE_FAILED";
+      const status = /FORBIDDEN/.test(message) ? 403 : /NOT_FOUND/.test(message) ? 404 : /STATUS_TRANSITION|IDEMPOTENCY/.test(message) ? 409 : 400;
+      return reply.status(status).send({ success: false, error: { code: message.split(":")[0], message } });
+    }
+  });
+
   server.post("/api/v1/supply-chain/receiving", async (_req, reply) => reply.status(501).send({ success: false, error: { code: "SUPPLY_CHAIN_PERSISTENCE_REQUIRED", message: "Use /api/v1/purchases/receipts for authoritative goods receiving." } }));
 
   server.post("/api/v1/supply-chain/3way-match", async (req, reply) => {
