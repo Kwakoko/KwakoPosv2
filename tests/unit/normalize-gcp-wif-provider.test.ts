@@ -60,6 +60,15 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(run(embeddedMarks)).toBe("provider=" + canonical);
   });
 
+  it("normalizes invisible Unicode separator and combining marks in fixed keywords only", () => {
+    const invisibleKeywords =
+      "pro\\u034fjects/123456789012/locations/global/workloadIdentity\\u200ePools/1234-pool/provi\\u00a0ders/5provider";
+    expect(run(invisibleKeywords)).toBe("provider=" + canonical);
+    const compatibilityKeywords =
+      "ｐrojects/123456789012/locations/global/workloadIdentityPools/1234-pool/providers/5provider";
+    expect(run(compatibilityKeywords)).toBe("provider=" + canonical);
+  });
+
   it("preserves valid provider identifiers ending in u, e, or f", () => {
     for (const suffix of ["u", "e", "f"]) {
       const value = canonical.replace("5provider", "valid-provider" + suffix);
