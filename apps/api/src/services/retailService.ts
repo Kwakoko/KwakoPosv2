@@ -71,7 +71,7 @@ export class RetailService {
     return {
       ...defaults, tenantId: ctx.tenantId, branchId: ctx.branchId,
       currency: String(retail.currency ?? tax.currencyCode ?? defaults.currency),
-      taxRatePct: Number(tax.vatEnabled ? (tax.vatRatePercent ?? 0) : 0),
+      taxRatePct: tax.vatEnabled === false ? 0 : Number(tax.vatRatePercent ?? defaults.taxRatePct),
       taxInclusivePricing: tax.taxInclusivePricing !== false,
       allowNegativeStock: Boolean(inventory.allowNegativeStock),
       maxDiscountPctWithoutApproval: Number(pos.maxDiscountPercent ?? defaults.maxDiscountPctWithoutApproval),
