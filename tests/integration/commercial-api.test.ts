@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { buildServer } from "../../apps/api/src/server.js";
+import { generateAccessToken } from "@kwakopos2/auth";
 import type { FastifyInstance } from "fastify";
 
 describe("Commercial Core REST API Routes (/api/v1/*)", () => {
@@ -60,6 +61,27 @@ describe("Commercial Core REST API Routes (/api/v1/*)", () => {
     const json = res.json();
     expect(json.success).toBe(true);
     expect(json.data.name).toBe("Tanzania Distilleries Ltd");
+  });
+
+  it("enforces Retail-specific capabilities on live API routes", async () => {
+    const token = generateAccessToken({
+      userId: tenantHeaders["x-user-id"],
+      tenantId: tenantHeaders["x-tenant-id"],
+      branchId: tenantHeaders["x-branch-id"],
+      roles: ["CASHIER"],
+      permissions: ["SALE_CREATE", "SALE_VIEW", "RETAIL_SETTINGS_MANAGE"],
+    });
+    const headers = { authorization: "Bearer " + token };
+    const checkout = await server.inject({ method: "POST", url: "/api/v1/retail/pos/checkout", headers, payload: {} });
+    const insights = await server.inject({ method: "GET", url: "/api/v1/retail/ai-insights", headers });
+    const replenishment = await server.inject({ method: "GET", url: "/api/v1/retail/replenishment", headers });
+    const settings = await server.inject({ method: "POST", url: "/api/v1/retail/settings", headers, payload: { receiptHeader: "No grant" } });
+    const certification = await server.inject({ method: "POST", url: "/api/v1/retail/certify", headers, payload: {} });
+    expect(checkout.statusCode).toBe(403);
+    expect(insights.statusCode).toBe(403);
+    expect(replenishment.statusCode).toBe(403);
+    expect(settings.statusCode).toBe(403);
+    expect(certification.statusCode).toBe(403);
   });
 
   it("executes product creation, PO, goods receipt, and POS sale", async () => {

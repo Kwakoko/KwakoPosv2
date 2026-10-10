@@ -9,6 +9,7 @@ import { globalReceiptService } from "./services/receiptService.js";
 import { receiptRoutes } from "./routes/receiptRoutes.js";
 import { traVfdRoutes } from "./routes/traVfdRoutes.js";
 import { globalSettingsService } from "./services/settingsService.js";
+import { assertRetailCapability as assertRetailCapabilityForContext } from "./services/retailAuthorization.js";
 import { startTraVfdReconciliationWorker } from "./services/traVfdService.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import { legalGovernanceRoutes } from "./routes/legalGovernanceRoutes.js";
@@ -4972,22 +4973,32 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/v1/retail/settings", async (req, reply) => {
-    const ctx = requireTenantContext(req);
-    const settings = await globalSettingsService.getSettings(ctx);
-    return reply.send({ success: true, data: settings["retail.config"] });
+    const ctx = assertRetailCapabilityForContext(requireTenantContext(req), "RETAIL_SETTINGS_VIEW", ["settings.read", "settings.manage"]);
+    const { globalRetailService } = await import("./services/retailService.js");
+    return reply.send({ success: true, data: await globalRetailService.getSettings(ctx) });
   });
 
   server.post("/api/v1/retail/settings", async (req, reply) => {
-    const ctx = requireTenantContext(req);
-    const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
-    const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
-    const allowed = permissions.includes("*") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
-    if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_MANAGE_REQUIRED", message: "settings.manage permission is required." } });
-    const result = await globalSettingsService.upsertBatch(ctx, [{ key: "retail.config", value: (req.body as any) || {}, scope: "BRANCH" }]);
-    return reply.send({ success: true, data: result[0] });
+    const ctx = assertRetailCapabilityForContext(requireTenantContext(req), "RETAIL_SETTINGS_MANAGE");
+    assertRetailCapabilityForContext(ctx, "SETTINGS_MANAGE", ["settings.manage"]);
+    const body = z.object({
+      currency: z.string().trim().min(3).max(12).optional(),
+      taxRatePct: z.number().finite().min(0).max(100).optional(),
+      taxInclusivePricing: z.boolean().optional(),
+      allowNegativeStock: z.boolean().optional(),
+      maxDiscountPctWithoutApproval: z.number().finite().min(0).max(100).optional(),
+      requireReceiptForReturn: z.boolean().optional(),
+      skuPrefix: z.string().trim().min(1).max(30).optional(),
+      barcodeFormat: z.enum(["EAN13", "UPC", "CODE128", "QR"]).optional(),
+      stockValuationMethod: z.enum(["FIFO", "WEIGHTED_AVERAGE"]).optional(),
+      receiptHeader: z.string().trim().max(160).optional(),
+      receiptFooter: z.string().trim().max(500).optional(),
+    }).strict().refine((value) => Object.keys(value).length > 0, "At least one Retail setting must be supplied").parse(req.body || {});
+    const { globalRetailService } = await import("./services/retailService.js");
+    return reply.send({ success: true, data: await globalRetailService.updateSettings(ctx, body) });
   });
 
-    // Authoritative pricing configuration. All mutations are tenant+branch scoped and audited.
+  // Authoritative pricing configuration. All mutations are tenant+branch scoped and audited.
   server.get("/api/v1/pricing/price-lists", async (req) => {
     const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
     const rows = await prisma.priceList.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }] });
@@ -5098,6 +5109,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
 server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
+    assertRetailCapabilityForContext(requireTenantContext(req), "RETAIL_POS_CHECKOUT");
     const ctx = assertSalesAuthority(req, "create");
     const validated = CreatePosSaleRequestSchema.parse(req.body);
     const discountRequested = Number(validated.discountTotal || 0) > 0 || validated.items.some((x: any) => Number(x.discountAmount || 0) > 0);
@@ -5116,23 +5128,18 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.get("/api/v1/retail/replenishment", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
-    const ctx = requireTenantContext(req);
-    return reply.status(200).send({
-      success: true,
-      data: globalRetailService.getReplenishmentSuggestions(ctx),
-    });
+    const ctx = assertRetailCapabilityForContext(requireTenantContext(req), "RETAIL_REPLENISHMENT_EXECUTE", ["retail.replenishment.view", "retail.replenishment.execute", "inventory.view", "inventory.manage"]);
+    return reply.status(200).send({ success: true, data: await globalRetailService.getReplenishmentSuggestions(ctx) });
   });
 
   server.get("/api/v1/retail/ai-insights", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
-    const ctx = requireTenantContext(req);
-    return reply.status(200).send({
-      success: true,
-      data: globalRetailService.getAiRecommendations(ctx),
-    });
+    const ctx = assertRetailCapabilityForContext(requireTenantContext(req), "RETAIL_AI_INSIGHTS_VIEW", ["retail.ai-insights.view", "ai.read"]);
+    return reply.status(200).send({ success: true, data: await globalRetailService.getAiRecommendations(ctx) });
   });
 
   server.post("/api/v1/retail/certify", async (req, reply) => {
+    requireAdminContext(req);
     const retCert = await globalReleaseService.runRetailCertification();
     return reply.status(200).send({
       success: true,

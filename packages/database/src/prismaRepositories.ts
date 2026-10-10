@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   TenantContext,
   Product,
@@ -352,31 +353,61 @@ export class PrismaProductRepository {
     return true;
   }
 
-  async recordPriceChange(ctx: TenantContext, req: any): Promise<any> {
-    const product = await this.getProductById(ctx, req.productId);
-    if (!product) throw new Error(`Product ${req.productId} not found`);
-    const variantId = req.variantId ?? null;
-    let previousBuyingPrice = product.buyingPrice;
-    let previousSellingPrice = product.sellingPrice;
-    if (variantId) {
-      const variant = await prisma.productVariant.findUnique({ where: { id: variantId } });
-      if (!variant) throw new Error(`Variant ${variantId} not found`);
-      assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
-      previousBuyingPrice = Number(variant.costPrice);
-      previousSellingPrice = Number(variant.price);
-    }
-    const where = { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: req.productId, ...(variantId ? { variantId } : {}) };
-    const latest = await prisma.productPriceHistory.findFirst({ where, orderBy: { versionNumber: 'desc' } });
+  async recordPriceChange(ctx: TenantContext, req: any, db: any = prisma): Promise<any> {
+    const newBuyingPrice = Number(req.newBuyingPrice);
+    const newSellingPrice = Number(req.newSellingPrice);
+    if (!Number.isFinite(newBuyingPrice) || newBuyingPrice < 0 ||
+        !Number.isFinite(newSellingPrice) || newSellingPrice < 0) throw new Error("PRODUCT_PRICE_INVALID");
+    const idempotencyKey = String(req.idempotencyKey || "").trim();
+    if (!idempotencyKey) throw new Error("PRODUCT_PRICE_IDEMPOTENCY_KEY_REQUIRED");
     const effectiveFrom = new Date(req.effectiveFrom ?? Date.now());
-    const versionNumber = (latest?.versionNumber ?? 0) + 1;
-    const row = await prisma.$transaction(async (tx:any) => {
+    if (!Number.isFinite(effectiveFrom.getTime())) throw new Error("PRODUCT_PRICE_EFFECTIVE_FROM_INVALID");
+
+    const apply = async (tx: any) => {
+      const product = await tx.product.findFirst({ where: { id: req.productId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!product) throw new Error("PRODUCT_PRICE_PRODUCT_NOT_FOUND");
+      const variantId = req.variantId ? String(req.variantId) : null;
+      let previousBuyingPrice = Number(product.buyingPrice ?? 0);
+      let previousSellingPrice = Number(product.sellingPrice ?? 0);
+      if (variantId) {
+        const variant = await tx.productVariant.findFirst({ where: { id: variantId, productId: product.id, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+        if (!variant) throw new Error("PRODUCT_PRICE_VARIANT_BOUNDARY_VIOLATION");
+        previousBuyingPrice = Number(variant.costPrice);
+        previousSellingPrice = Number(variant.price);
+      }
+      const existing = await tx.productPriceHistory.findUnique({ where: { idempotencyKey } });
+      if (existing) {
+        const sameRequest = existing.tenantId === ctx.tenantId && existing.branchId === ctx.branchId &&
+          existing.productId === product.id && (existing.variantId ?? null) === variantId &&
+          Number(existing.newBuyingPrice) === newBuyingPrice && Number(existing.newSellingPrice) === newSellingPrice;
+        if (!sameRequest) throw new Error("PRODUCT_PRICE_IDEMPOTENCY_CONFLICT");
+        return existing;
+      }
+      const where = { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: product.id, ...(variantId ? { variantId } : {}) };
+      const latest = await tx.productPriceHistory.findFirst({ where, orderBy: { versionNumber: "desc" } });
+      const versionNumber = (latest?.versionNumber ?? 0) + 1;
+      const marginAmount = newSellingPrice - newBuyingPrice;
+      const marginPercentage = newSellingPrice > 0 ? (marginAmount / newSellingPrice) * 100 : 0;
       await tx.productPriceHistory.updateMany({ where: { ...where, effectiveTo: null }, data: { effectiveTo: effectiveFrom } });
-      const h = await tx.productPriceHistory.upsert({ where: { idempotencyKey: req.idempotencyKey }, create: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, productId: req.productId, variantId, versionNumber, previousBuyingPrice, newBuyingPrice: req.newBuyingPrice, previousSellingPrice, newSellingPrice: req.newSellingPrice, marginAmount: req.newSellingPrice-req.newBuyingPrice, marginPercentage: req.newSellingPrice>0?((req.newSellingPrice-req.newBuyingPrice)/req.newSellingPrice)*100:0, changeType:req.changeType, changeReason:req.changeReason, effectiveFrom, changedByUserId:ctx.userId, deviceId:req.deviceId, idempotencyKey:req.idempotencyKey }, update:{} });
-      if (variantId) await tx.productVariant.update({ where:{id:variantId}, data:{costPrice:req.newBuyingPrice, price:req.newSellingPrice} });
-      else await tx.product.update({ where:{id:req.productId}, data:{buyingPrice:req.newBuyingPrice,sellingPrice:req.newSellingPrice,currentMarginAmount:req.newSellingPrice-req.newBuyingPrice,currentMarginPercentage:req.newSellingPrice>0?((req.newSellingPrice-req.newBuyingPrice)/req.newSellingPrice)*100:0} });
-      return h;
-    });
-    return { ...row, previousBuyingPrice:Number(row.previousBuyingPrice), newBuyingPrice:Number(row.newBuyingPrice), previousSellingPrice:Number(row.previousSellingPrice), newSellingPrice:Number(row.newSellingPrice), marginAmount:Number(row.marginAmount), marginPercentage:Number(row.marginPercentage), effectiveFrom:row.effectiveFrom.toISOString(), effectiveTo:row.effectiveTo?.toISOString()??null, createdAt:row.createdAt.toISOString() };
+      const history = await tx.productPriceHistory.create({ data: {
+        id: String(req.id || randomUUID()), tenantId: ctx.tenantId, branchId: ctx.branchId, productId: product.id, variantId,
+        versionNumber, previousBuyingPrice, newBuyingPrice, previousSellingPrice, newSellingPrice, marginAmount, marginPercentage,
+        changeType: String(req.changeType || "MANUAL_ADJUSTMENT"), changeReason: String(req.changeReason || "Price change"),
+        effectiveFrom, changedByUserId: ctx.userId, deviceId: String(req.deviceId || "unknown"), idempotencyKey,
+      }});
+      if (variantId) await tx.productVariant.update({ where: { id: variantId }, data: { costPrice: newBuyingPrice, price: newSellingPrice } });
+      else await tx.product.update({ where: { id: product.id }, data: {
+        buyingPrice: newBuyingPrice, sellingPrice: newSellingPrice, currentMarginAmount: marginAmount, currentMarginPercentage: marginPercentage,
+      }});
+      return history;
+    };
+    const row = db === prisma ? await prisma.$transaction((tx: any) => apply(tx)) : await apply(db);
+    return {
+      ...row, previousBuyingPrice: Number(row.previousBuyingPrice), newBuyingPrice: Number(row.newBuyingPrice),
+      previousSellingPrice: Number(row.previousSellingPrice), newSellingPrice: Number(row.newSellingPrice),
+      marginAmount: Number(row.marginAmount), marginPercentage: Number(row.marginPercentage),
+      effectiveFrom: row.effectiveFrom.toISOString(), effectiveTo: row.effectiveTo?.toISOString() ?? null, createdAt: row.createdAt.toISOString(),
+    };
   }
 
   async getPriceHistory(ctx: TenantContext, productId: string, variantId?: string): Promise<any[]> {

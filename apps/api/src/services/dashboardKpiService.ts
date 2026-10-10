@@ -1,5 +1,7 @@
 import type { TenantContext } from "@kwakopos2/contracts";
-import { prisma } from "@kwakopos2/database";
+import { prisma, setRlsTenantContext } from "@kwakopos2/database";
+
+const DASHBOARD_READ_MODEL_VERSION = 2;
 
 export interface DashboardRevenuePoint {
   name: string;
@@ -76,6 +78,9 @@ export interface DashboardKpiSnapshot {
   lowStockCount: number;
   outOfStockCount: number;
   customerDebts: number;
+  supplierPayables: number;
+  overduePayables: number;
+  overduePayablesCount: number;
   customerCount: number;
   productCount: number;
   supplierCount: number;
@@ -108,6 +113,8 @@ export async function getDashboardKpiSnapshot(
   }
 
   return prisma.$transaction(async (tx) => {
+    await setRlsTenantContext(tx as any, ctx);
+
     // Dashboard reporting uses UTC as its canonical reporting timezone. Pin the
     // transaction timezone so CURRENT_DATE, DATE(timestamp), and EXTRACT(HOUR)
     // all describe the same UTC calendar/hour used by the application window.
@@ -121,8 +128,24 @@ export async function getDashboardKpiSnapshot(
       ctx.branchId,
     );
     const asOfRevision = String(revisionRows[0]?.revision ?? "0");
+    const cachedReadModel = await tx.dashboardReadModel.findUnique({
+      where: {
+        tenantId_branchId_timeframe: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          timeframe,
+        },
+      },
+    });
+    if (
+      cachedReadModel &&
+      cachedReadModel.asOfRevision === asOfRevision &&
+      cachedReadModel.snapshotVersion === DASHBOARD_READ_MODEL_VERSION
+    ) {
+      return cachedReadModel.snapshot as unknown as DashboardKpiSnapshot;
+    }
 
-    const [salesRows, inventoryRows, stockRows, customerRows, productRows, supplierRows] = await Promise.all([
+    const [salesRows, inventoryRows, stockRows, customerRows, productRows, supplierRows, payableRows] = await Promise.all([
       tx.$queryRawUnsafe<Array<{ sales_today: unknown; gross_sales_today: unknown; discounts_today: unknown; gross_profit: unknown; cogs_today: unknown; order_count: bigint | number | string; completed_orders: bigint | number | string }>>(
         `SELECT
            COALESCE(SUM("grandTotal" - "taxTotal") FILTER (WHERE "status" = 'COMPLETED'), 0) AS sales_today,
@@ -141,7 +164,11 @@ export async function getDashboardKpiSnapshot(
         ctx.branchId,
       ),
       tx.$queryRawUnsafe<Array<{ inventory_value: unknown }>>(
-        `SELECT COALESCE(SUM("stockValue"), 0) AS inventory_value
+        `SELECT COALESCE(
+                  SUM("stockValue") FILTER (WHERE "warehouseId" IS NULL),
+                  SUM("stockValue"),
+                  0
+                ) AS inventory_value
            FROM product_branch_stock
           WHERE "tenantId" = $1
             AND "branchId" = $2`,
@@ -191,12 +218,24 @@ export async function getDashboardKpiSnapshot(
         ctx.tenantId,
         ctx.branchId,
       ),
+      tx.$queryRawUnsafe<Array<{ supplier_payables: unknown; overdue_payables: unknown; overdue_payables_count: bigint | number | string }>>(
+        `SELECT
+           COALESCE(SUM("balanceDue") FILTER (WHERE "status" <> 'REJECTED'), 0) AS supplier_payables,
+           COALESCE(SUM("balanceDue") FILTER (WHERE "status" <> 'REJECTED' AND "balanceDue" > 0 AND "dueDate" < CURRENT_DATE), 0) AS overdue_payables,
+           COUNT(*) FILTER (WHERE "status" <> 'REJECTED' AND "balanceDue" > 0 AND "dueDate" < CURRENT_DATE) AS overdue_payables_count
+         FROM supplier_invoices
+        WHERE "tenantId" = $1
+          AND "branchId" = $2`,
+        ctx.tenantId,
+        ctx.branchId,
+      ),
     ]);
 
     const sales = salesRows[0] ?? {};
     const inventory = inventoryRows[0] ?? {};
     const stock = stockRows[0] ?? {};
     const customers = customerRows[0] ?? {};
+    const payables = payableRows[0] ?? {};
 
     // Dashboard analytics are derived from the same PostgreSQL transaction snapshot
     // as the core KPIs. Browser/IndexedDB state is never used for online analytics.
@@ -275,7 +314,7 @@ export async function getDashboardKpiSnapshot(
       ),
       tx.$queryRawUnsafe<Array<{ paymentMethod: string; volume: unknown; count: bigint | number | string; order_count: bigint | number | string }>>(
         `SELECT COALESCE(p."paymentMethod", 'CASH') AS "paymentMethod",
-                COALESCE(SUM(p."amount"),0) AS volume,
+                COALESCE(SUM(GREATEST(0, p."amount" - COALESCE(p."refundedAmount",0))),0) AS volume,
                 COUNT(*) AS count,
                 COUNT(DISTINCT p."saleId") AS order_count
            FROM payments p
@@ -284,14 +323,14 @@ export async function getDashboardKpiSnapshot(
             AND s."branchId" = p."branchId"
           WHERE p."tenantId" = $1 AND p."branchId" = $2
             AND s."tenantId" = $1 AND s."branchId" = $2
-            AND p."status" = 'COMPLETED' AND s."status" = 'COMPLETED'
+            AND p."status" IN ('COMPLETED','PARTIALLY_REFUNDED') AND COALESCE(p."isRefund", false) = false AND s."status" = 'COMPLETED'
             AND s."soldAt" >= $3 AND s."soldAt" < $4
           GROUP BY COALESCE(p."paymentMethod", 'CASH')
           ORDER BY volume DESC`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
       ),
       tx.$queryRawUnsafe<Array<{ total_volume: unknown; payment_count: bigint | number | string; order_count: bigint | number | string }>>(
-        `SELECT COALESCE(SUM(p."amount"),0) AS total_volume,
+        `SELECT COALESCE(SUM(GREATEST(0, p."amount" - COALESCE(p."refundedAmount",0))),0) AS total_volume,
                 COUNT(*) AS payment_count,
                 COUNT(DISTINCT p."saleId") AS order_count
            FROM payments p
@@ -300,7 +339,7 @@ export async function getDashboardKpiSnapshot(
             AND s."branchId" = p."branchId"
           WHERE p."tenantId" = $1 AND p."branchId" = $2
             AND s."tenantId" = $1 AND s."branchId" = $2
-            AND p."status" = 'COMPLETED' AND s."status" = 'COMPLETED'
+            AND p."status" IN ('COMPLETED','PARTIALLY_REFUNDED') AND COALESCE(p."isRefund", false) = false AND s."status" = 'COMPLETED'
             AND s."soldAt" >= $3 AND s."soldAt" < $4`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
       ),      tx.$queryRawUnsafe<Array<{ product_id: string; name: string; revenue: unknown; units: unknown; stock: unknown; category: string; revenue_rank: number; units_rank: number }>>(
@@ -502,7 +541,7 @@ export async function getDashboardKpiSnapshot(
     const lowStockCount = numberValue(stock.low_stock);
     const outOfStockCount = numberValue(stock.out_of_stock);
 
-    return {
+    const result: DashboardKpiSnapshot = {
       asOfRevision,
       capturedAt: new Date().toISOString(),
       tenantId: ctx.tenantId,
@@ -523,6 +562,9 @@ export async function getDashboardKpiSnapshot(
       lowStockCount,
       outOfStockCount,
       customerDebts: numberValue(customers.customer_debts),
+      supplierPayables: numberValue(payables.supplier_payables),
+      overduePayables: numberValue(payables.overdue_payables),
+      overduePayablesCount: numberValue(payables.overdue_payables_count),
       customerCount: numberValue(customers.customer_count),
       productCount: numberValue(productRows[0]?.product_count),
       supplierCount: numberValue(supplierRows[0]?.supplier_count),
@@ -540,6 +582,8 @@ export async function getDashboardKpiSnapshot(
         ProductCount: numberValue(productRows[0]?.product_count),
         StockAlerts: lowStockCount + outOfStockCount,
         CustomerDebts: numberValue(customers.customer_debts),
+        SupplierPayables: numberValue(payables.supplier_payables),
+        OverduePayables: numberValue(payables.overdue_payables),
         InventoryValue: numberValue(inventory.inventory_value),
         CompletedOrders: numberValue(sales.completed_orders),
         LowStock: lowStockCount,
@@ -571,5 +615,32 @@ export async function getDashboardKpiSnapshot(
         ConsultantExpiringContracts: null,
       },
     };
+
+    await tx.dashboardReadModel.upsert({
+      where: {
+        tenantId_branchId_timeframe: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          timeframe,
+        },
+      },
+      create: {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        timeframe,
+        asOfRevision,
+        snapshotVersion: DASHBOARD_READ_MODEL_VERSION,
+        snapshot: result as any,
+        capturedAt: new Date(),
+      },
+      update: {
+        asOfRevision,
+        snapshotVersion: DASHBOARD_READ_MODEL_VERSION,
+        snapshot: result as any,
+        capturedAt: new Date(),
+      },
+    });
+
+    return result;
   }, { isolationLevel: "RepeatableRead" });
 }
