@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createHash, execFileSync } from "node:crypto";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { runRetailCertification } from "./runRetailCertification.js";
 
 const LOCK_ID = "RETAIL-PRODUCTION-LOCK-2026-10-10";
