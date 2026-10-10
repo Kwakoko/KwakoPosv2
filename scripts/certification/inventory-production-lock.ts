@@ -10,11 +10,11 @@ const REQUIRED_SUBITEMS = [
 ];
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "apps/web/src/pages/InventoryPage.tsx": "b82e73ee898254e4c5c89a979d700b8f6f4124b3",
+  "apps/web/src/pages/InventoryPage.tsx": "47f1504cf358aa6a6a3070c7cb36d65177ed1ef7",
   "apps/web/src/services/inventoryStockService.ts": "5fadbef7dc8de26e7bc93ce95547cf7a9c8f7e3b",
-  "packages/database/src/prismaRepositories.ts": "d53a4e232250e68a0359f10e915601d84f9418d1",
+  "packages/database/src/prismaRepositories.ts": "11a089c677f41755d737acfc01694bd7e7bcab73",
   "packages/database/src/inventoryAuthority.ts": "fd3d915de4ac1851a562ee3554c5598d71529cc9",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "981f5773f39aabd4e18f3fd630fe34b940f0a662",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "7d81e55e63e5eb74353fab128d971a70bc24a6e5",
   "apps/web/src/indexedDb.ts": "1893f5704481b7a7178e80622b99a8c4ae42376c",
   "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae",
   "tests/unit/stock-ledger-movement.test.ts": "d24fcfb9a39a76b8d60a282ce2c4401c07e7bb2c",
