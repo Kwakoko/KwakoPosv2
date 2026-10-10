@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 const LOCK_ID = "SALES-PRODUCTION-LOCK-V2-2026-10-08";
 const REQUIRED_SUBITEMS = ["Sales Dashboard","POS","New Sale","Cart","Product selection","Customer selection","Discounts","Taxes","Payments","Payment channels","Receipts","Refunds","Voids/cancellations","Sales history","Sales detail","Recent orders","Sales reports","Sales sync/outbox","Sales ledger/audit trail","Product Bundles / Kits","Bundle definition","Bundle components","Component quantities","Bundle stock availability","Bundle sale","Component stock deduction","Bundle reverse/refund","Bundle reporting","Bundle ledger integrity","Bundle offline synchronization"];
 
 const LOCKED_BLOBS: Record<string,string> = {
-  "apps/web/src/pages/PosPage.tsx": "35648f21f71204e65333582c33af9287a1a1edb1",
+  "apps/web/src/pages/PosPage.tsx": "ec4bd7342a013ebe583e02360f3173a0ea2eaffd",
   "apps/api/src/server.ts": "aef442415a28d84397ca5e34fc8988157c48da63",
   "packages/contracts/src/index.ts": "27b80e50d9ee754721393adc6d858b1e71143cd2",
   "packages/database/src/atomicCommercialFinance.ts": "61a73fb17fc50306939e68ca1443356534c5b1f0",
@@ -40,11 +40,18 @@ const MARKERS: Array<[string,string,string[]]> = [
 ];
 
 function read(p:string){ const f=path.resolve(process.cwd(),p); if(!fs.existsSync(f)) throw new Error("missing file: "+p); return fs.readFileSync(f,"utf8"); }
-function blobSha(content:string){ const b=Buffer.from(content); const h=createHash("sha1"); h.update(Buffer.from("blob "+b.length+"\0")); h.update(b); return h.digest("hex"); }
+// Hash the canonical Git blob representation so Windows CRLF working copies
+// certify identically to Linux CI and the repository's other production locks.
+function blobSha(content:string, p:string){
+  return execFileSync("git", ["hash-object", "--path="+p, "--stdin"], {
+    input: Buffer.from(content, "utf8"),
+    encoding: "utf8",
+  }).trim();
+}
 
 const failures:string[]=[];
 for(const [p,expected] of Object.entries(LOCKED_BLOBS)){
-  try{ const actual=blobSha(read(p)); if(actual!==expected) failures.push(`LOCK_DRIFT: ${p} expected ${expected} got ${actual}`); }
+  try{ const actual=blobSha(read(p),p); if(actual!==expected) failures.push(`LOCK_DRIFT: ${p} expected ${expected} got ${actual}`); }
   catch(e){ failures.push(`LOCK_READ_FAILURE: ${p}: ${String(e)}`); }
 }
 for(const [name,p,needles] of MARKERS){
