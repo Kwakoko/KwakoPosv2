@@ -331,20 +331,28 @@ export class RetailEngine {
 
     let totalRefund = 0;
     const lines = originalSale.lines || [];
-
+    const requestedByVariant = new Map<string, number>();
     for (const rItem of returnItems) {
-      const origLine = lines.find((l) => l.variantId === rItem.variantId);
-      if (!origLine) {
-        return { valid: false, error: `Variant ${rItem.variantId} was not part of original sale`, totalRefundAmount: 0 };
+      const quantityReturned = Number(rItem.quantityReturned);
+      const refundUnitPrice = Number(rItem.refundUnitPrice);
+      if (!Number.isFinite(quantityReturned) || quantityReturned <= 0) {
+        return { valid: false, error: "Return quantity must be a finite positive number", totalRefundAmount: 0 };
       }
-      if (rItem.quantityReturned > origLine.quantity) {
+      if (!Number.isFinite(refundUnitPrice) || refundUnitPrice < 0) {
+        return { valid: false, error: "Refund unit price must be a finite non-negative number", totalRefundAmount: 0 };
+      }
+      const origLine = lines.find((line) => line.variantId === rItem.variantId);
+      if (!origLine) return { valid: false, error: "Variant " + rItem.variantId + " was not part of original sale", totalRefundAmount: 0 };
+      const cumulativeQuantity = (requestedByVariant.get(rItem.variantId) || 0) + quantityReturned;
+      if (cumulativeQuantity > Number(origLine.quantity) + 0.000001) {
         return {
           valid: false,
-          error: `Return quantity (${rItem.quantityReturned}) exceeds original sold quantity (${origLine.quantity})`,
+          error: "Return quantity (" + cumulativeQuantity + ") exceeds original sold quantity (" + origLine.quantity + ")",
           totalRefundAmount: 0,
         };
       }
-      totalRefund += rItem.quantityReturned * rItem.refundUnitPrice;
+      requestedByVariant.set(rItem.variantId, cumulativeQuantity);
+      totalRefund += quantityReturned * refundUnitPrice;
     }
 
     return {
@@ -389,39 +397,28 @@ export class RetailEngine {
       costPrice: number;
       preferredSupplierId?: string;
     }>,
-    salesVelocityMap: Map<string, number>, // variantId -> sales/day
+    salesVelocityMap: Map<string, number>,
     leadTimeDays: number = 7,
     safetyStockDays: number = 3
   ): RetailReplenishmentSuggestion[] {
     const suggestions: RetailReplenishmentSuggestion[] = [];
-
     for (const item of items) {
-      const velocity = salesVelocityMap.get(item.variantId) || 2.5; // default 2.5/day
+      const suppliedVelocity = salesVelocityMap.get(item.variantId);
+      const velocity = Number.isFinite(suppliedVelocity) ? Math.max(0, Number(suppliedVelocity)) : 0;
       const safetyStock = Math.ceil(velocity * safetyStockDays);
-      const reorderPoint = Math.ceil(velocity * leadTimeDays) + safetyStock;
-
-      if (item.currentStock <= reorderPoint || item.currentStock <= item.reorderLevel) {
-        const targetStock = reorderPoint * 2;
-        const suggestedQty = Math.max(1, targetStock - item.currentStock);
-        const estCost = suggestedQty * item.costPrice;
-
-        suggestions.push({
-          productId: item.productId,
-          variantId: item.variantId,
-          productName: item.productName,
-          sku: item.sku,
-          currentStock: item.currentStock,
-          reorderLevel: item.reorderLevel,
-          salesVelocityPerDay: velocity,
-          leadTimeDays,
-          safetyStock,
-          suggestedReorderQuantity: suggestedQty,
-          estimatedCostTzs: estCost,
-          preferredSupplierId: item.preferredSupplierId,
-        });
-      }
+      const demandReorderPoint = Math.ceil(velocity * leadTimeDays) + safetyStock;
+      const reorderPoint = Math.max(0, Number(item.reorderLevel) || 0, demandReorderPoint);
+      if (reorderPoint <= 0 || Number(item.currentStock) > reorderPoint) continue;
+      const targetStock = Math.max(reorderPoint * 2, Math.ceil(velocity * (leadTimeDays + safetyStockDays)));
+      const suggestedQty = Math.max(0, Math.ceil(targetStock - Number(item.currentStock)));
+      if (suggestedQty <= 0) continue;
+      suggestions.push({
+        productId: item.productId, variantId: item.variantId, productName: item.productName, sku: item.sku,
+        currentStock: Number(item.currentStock), reorderLevel: Number(item.reorderLevel), salesVelocityPerDay: velocity,
+        leadTimeDays, safetyStock, suggestedReorderQuantity: suggestedQty,
+        estimatedCostTzs: suggestedQty * Number(item.costPrice), preferredSupplierId: item.preferredSupplierId,
+      });
     }
-
     return suggestions;
   }
 
@@ -432,44 +429,44 @@ export class RetailEngine {
   ): RetailAiRecommendation[] {
     const recommendations: RetailAiRecommendation[] = [];
     const now = new Date().toISOString();
-
     for (const inv of inventory) {
-      const hist = salesHistory.find((h) => h.variantId === inv.variantId);
-      const sales = hist ? hist.sales30Days : 5;
-
-      // 1. Stockout Prediction
-      if (inv.currentStock <= inv.reorderLevel) {
+      const history = salesHistory.find((item) => item.variantId === inv.variantId);
+      const sales = Math.max(0, Number(history?.sales30Days ?? 0));
+      const dailyVelocity = sales / 30;
+      const stock = Math.max(0, Number(inv.currentStock));
+      const threshold = Math.max(0, Number(inv.reorderLevel));
+      const stockValue = stock * Math.max(0, Number(inv.costPrice));
+      if (threshold > 0 && stock <= threshold) {
+        const hasDemand = sales > 0;
+        const depletionDays = hasDemand ? Math.floor(stock / dailyVelocity) : null;
         recommendations.push({
-          recommendationId: `REC-SO-${randomUUID().slice(0, 6)}`,
-          tenantId: ctx.tenantId,
-          branchId: ctx.branchId,
-          category: "STOCKOUT_PREDICTION",
-          observation: `Stock level for '${inv.productName}' is at ${inv.currentStock} units (below reorder threshold of ${inv.reorderLevel}).`,
-          evidence: `Average sales velocity is ${(sales / 30).toFixed(1)} units/day. Current stock will deplete in ${Math.max(1, Math.round(inv.currentStock / Math.max(0.1, sales / 30)))} days.`,
-          recommendation: `Issue Purchase Order for ${inv.reorderLevel * 3} units immediately to prevent stockout.`,
-          expectedImpact: "Avoids an estimated 450,000 TZS in lost retail revenue.",
-          confidenceScore: 96,
-          createdAt: now,
+          recommendationId: "REC-SO-" + randomUUID().slice(0, 6),
+          tenantId: ctx.tenantId, branchId: ctx.branchId, category: "STOCKOUT_PREDICTION",
+          observation: "Stock for '" + inv.productName + "' is " + stock + " units against reorder threshold " + threshold + ".",
+          evidence: hasDemand
+            ? sales + " net units sold in 30 days (" + dailyVelocity.toFixed(2) + " units/day); estimated stock cover is " + depletionDays + " days."
+            : "No net sales were recorded in the last 30 days. A demand-based depletion forecast is unavailable.",
+          recommendation: hasDemand
+            ? "Review replenishment against validated lead time and supplier availability."
+            : "Verify item demand, configured reorder policy, and stock count before replenishing.",
+          expectedImpact: hasDemand
+            ? "Stockout risk is present. Current at-cost inventory is " + stockValue.toLocaleString() + " TZS; lost revenue is not projected without validated pricing and demand."
+            : "Current at-cost inventory is " + stockValue.toLocaleString() + " TZS; no lost-revenue estimate is made without demand evidence.",
+          confidenceScore: hasDemand ? 70 : 35, createdAt: now,
         });
       }
-
-      // 2. Slow-Moving / Dead Stock
-      if (inv.currentStock > inv.reorderLevel * 4 && sales < 3) {
+      if (threshold > 0 && stock > threshold * 4 && sales < 3) {
         recommendations.push({
-          recommendationId: `REC-DS-${randomUUID().slice(0, 6)}`,
-          tenantId: ctx.tenantId,
-          branchId: ctx.branchId,
-          category: "SLOW_MOVING_DEAD_STOCK",
-          observation: `Excess inventory detected for '${inv.productName}' (${inv.currentStock} units held).`,
-          evidence: `Only ${sales} units sold in the last 30 days. Holding cost is tying up ${inv.currentStock * inv.costPrice} TZS capital.`,
-          recommendation: "Create a 15% promotional bundle discount to accelerate stock liquidation.",
-          expectedImpact: `Frees up approx ${(inv.currentStock * inv.costPrice * 0.8).toLocaleString()} TZS working capital.`,
-          confidenceScore: 92,
-          createdAt: now,
+          recommendationId: "REC-DS-" + randomUUID().slice(0, 6),
+          tenantId: ctx.tenantId, branchId: ctx.branchId, category: "SLOW_MOVING_DEAD_STOCK",
+          observation: "Stock for '" + inv.productName + "' is " + stock + " units, more than four times its configured reorder threshold.",
+          evidence: sales + " net units sold in 30 days. Current stock at cost is " + stockValue.toLocaleString() + " TZS.",
+          recommendation: "Review stock count, item status, and supplier return or markdown options before repricing.",
+          expectedImpact: "Up to " + stockValue.toLocaleString() + " TZS at cost is tied up in this stock position; recoverable value depends on disposition.",
+          confidenceScore: sales === 0 ? 55 : 65, createdAt: now,
         });
       }
     }
-
     return recommendations;
   }
 
