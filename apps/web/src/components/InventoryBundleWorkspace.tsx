@@ -42,7 +42,7 @@ export const InventoryBundleWorkspace: React.FC = () => {
         toast.error("Bundle Save Rejected", "Components must be unique active variants in the current tenant and branch, with positive quantities."); return;
       }
       if (component.attributes?.__bundle === true || Array.isArray(component.attributes?.bundleComponents)) {
-        toast.error("Bundle Save Rejected", "Nested bundles and kits are not supported."); return;
+        toast.error("Bundle Save Rejected", "Nested bundles/kits are not supported."); return;
       }
       seen.add(component.id);
     }
