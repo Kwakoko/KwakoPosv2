@@ -25,7 +25,7 @@ import {
   TrendingUp, TrendingDown, DollarSign, Package, Users,
   AlertTriangle, Clock, PiggyBank, Briefcase,
   Sparkles, Layers, Egg, Footprints, Truck, ArrowRight, Calendar,
-  ShoppingCart, BarChart2, CheckCircle, RefreshCw, Zap, Star,
+  ShoppingCart, BarChart2, CheckCircle, RefreshCw, Star,
   Banknote, CreditCard, Smartphone, Building2, ArrowLeftRight, Wallet, Flame,
   Printer, Award, Eye, User, Download, UserCheck, ShieldCheck
 } from 'lucide-react';
