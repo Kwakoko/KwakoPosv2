@@ -114,8 +114,8 @@ export class RetailService {
     if (!Number.isFinite(value) || value < 0 || (kind === "PERCENTAGE" && value > 100)) {
       throw new Error("RETAIL_PROMOTION_VALUE_INVALID");
     }
-    const startAt = new Date(promo.startDate);
-    const endAt = new Date(promo.endDate);
+    const startAt = promo.startDate instanceof Date ? new Date(promo.startDate.getTime()) : new Date(promo.startDate);
+    const endAt = promo.endDate instanceof Date ? new Date(promo.endDate.getTime()) : new Date(promo.endDate);
     if (!Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || endAt <= startAt) {
       throw new Error("RETAIL_PROMOTION_DATE_RANGE_INVALID");
     }
