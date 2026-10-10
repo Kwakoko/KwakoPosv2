@@ -31,7 +31,8 @@ import {
   Wine,
   Building2,
 } from "lucide-react";
-import { useSync, useTheme, useModule } from "../../context/KwakoPosContexts.js";
+import { useBranch, useSync, useTenant, useTheme, useModule } from "../../context/KwakoPosContexts.js";
+import { filterRecordsToTenantBranchScope } from "../../services/posCatalogScope.js";
 import { EmptyState } from "./EmptyState.js";
 
 export interface CommandPaletteModalProps {
@@ -70,6 +71,8 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   onNavigate,
 }) => {
   const { db } = useSync();
+  const { currentTenantId } = useTenant();
+  const { currentBranchId } = useBranch();
   const { theme, toggleTheme } = useTheme();
   const { setActiveModule, availableModules } = useModule();
 
@@ -384,10 +387,16 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         Boolean(c.keywords?.some((k) => k.includes(q))),
     );
 
-    // Filter local products
+    // IndexedDB can contain multiple tenants/branches on a shared device. Scope
+    // every local business search before matching text, and fail closed without context.
     const prods: PaletteProduct[] = [];
-    if (db?.products) {
-      for (const p of db.products.values()) {
+    if (db?.products && currentTenantId && currentBranchId) {
+      const scopedProducts = filterRecordsToTenantBranchScope(
+        Array.from(db.products.values()),
+        currentTenantId,
+        currentBranchId,
+      );
+      for (const p of scopedProducts) {
         if (
           p.name?.toLowerCase().includes(q) ||
           p.sku?.toLowerCase().includes(q) ||
@@ -405,10 +414,15 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
       }
     }
 
-    // Filter local customers
+    // Customer names and contact details are tenant/branch restricted too.
     const custs: PaletteCustomer[] = [];
-    if (db?.customers) {
-      for (const c of db.customers.values()) {
+    if (db?.customers && currentTenantId && currentBranchId) {
+      const scopedCustomers = filterRecordsToTenantBranchScope(
+        Array.from(db.customers.values()),
+        currentTenantId,
+        currentBranchId,
+      );
+      for (const c of scopedCustomers) {
         if (
           c.name?.toLowerCase().includes(q) ||
           c.phone?.toLowerCase().includes(q) ||
@@ -426,7 +440,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     }
 
     return { commands: cmds, products: prods, customers: custs };
-  }, [query, systemCommands, db]);
+  }, [query, systemCommands, db, currentTenantId, currentBranchId]);
 
   // Flatten searchable list for keyboard up/down navigation
   const flatItems = useMemo(() => {

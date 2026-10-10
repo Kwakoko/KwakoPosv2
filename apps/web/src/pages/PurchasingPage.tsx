@@ -22,6 +22,7 @@ import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
 import { apiFetch, safeUUID } from "../services/applicationApiService.js";
+import { filterRecordsToTenantBranchScope } from "../services/posCatalogScope.js";
 
 type PurchTab = "suppliers" | "orders" | "grn" | "invoices";
 
@@ -189,7 +190,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
         apiFetch<{ success: boolean; data: any[] }>("/api/v1/purchases/receipts"),
       ]);
 
-      const productsById = new Map(Array.from(db.products.values()).map((p: any) => [p.id, p]));
+      const productsById = new Map(filterRecordsToTenantBranchScope(Array.from(db.products.values()), currentTenantId, currentBranchId).map((p: any) => [p.id, p]));
       const prods = Array.from(db.productVariants.values())
         .filter((v: any) => v.tenantId === currentTenantId && v.branchId === currentBranchId && v.isActive !== false)
         .map((v: any) => {
@@ -240,7 +241,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
         total: (o.payload.items || []).reduce((s: number, i: any) => s + Number(i.quantityOrdered) * Number(i.unitCost), 0), status: "Draft", expected: new Date().toISOString(), date: new Date().toISOString(),
       })));
       setGrns([]);
-      const productsById = new Map(Array.from(db.products.values()).map((p: any) => [p.id, p]));
+      const productsById = new Map(filterRecordsToTenantBranchScope(Array.from(db.products.values()), currentTenantId, currentBranchId).map((p: any) => [p.id, p]));
       setCatalogProducts(Array.from(db.productVariants.values())
         .filter((v: any) => v.tenantId === currentTenantId && v.branchId === currentBranchId && v.isActive !== false)
         .map((v: any) => {
