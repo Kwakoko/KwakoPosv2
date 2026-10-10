@@ -321,3 +321,63 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* Compact landscape KPI cards sized to the dashboard reference. */
+.dashboard-kpi-card {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.dashboard-kpi-card--hero {
+  min-height: 132px;
+  padding: 0.875rem 1rem;
+}
+.dashboard-kpi-card--compact {
+  min-height: 116px;
+  padding: 0.75rem;
+}
+.dashboard-kpi-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dashboard-kpi-icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+}
+.dashboard-kpi-icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+.dashboard-kpi-title {
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+.dashboard-kpi-value--hero {
+  margin-top: 0.5rem;
+  font-size: 1.55rem;
+  line-height: 1.05;
+}
+.dashboard-kpi-value--compact {
+  margin-top: 0.45rem;
+  font-size: 1.35rem;
+  line-height: 1.05;
+}
+.dashboard-kpi-description {
+  margin-top: 0.5rem;
+  max-width: 90%;
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+.dashboard-kpi-sparkline {
+  flex: 0 0 auto;
+}
+@media (max-width: 639px) {
+  .dashboard-kpi-card--hero {
+    min-height: 126px;
+  }
+  .dashboard-kpi-description {
+    max-width: 100%;
+  }
+}
