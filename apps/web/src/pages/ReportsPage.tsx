@@ -106,7 +106,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     if (!propActiveTab) return;
     const map: Record<string, ReportTab> = {
       "Sales": "sales",
+      "Sales Today": "sales",
       "Profit": "profit",
+      "Profit Today": "profit",
       "Profit & Loss": "profit",
       "Cashier Performance": "cashier",
       "Payment Methods": "payment",
@@ -127,6 +129,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     };
     if (map[propActiveTab]) {
       setActiveTab(map[propActiveTab]);
+    }
+    if (propActiveTab === "Sales Today" || propActiveTab === "Profit Today") {
+      setDateRange("today");
     }
   }, [propActiveTab]);
 

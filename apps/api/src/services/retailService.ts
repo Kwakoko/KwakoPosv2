@@ -84,7 +84,9 @@ export class RetailService {
     const kind = String(row.kind).toUpperCase();
     const type = kind === "PERCENTAGE" || kind === "PERCENTAGE_DISCOUNT" ? "PERCENTAGE_DISCOUNT"
       : kind === "FIXED" || kind === "FIXED_AMOUNT_DISCOUNT" ? "FIXED_AMOUNT_DISCOUNT"
-      : kind === "BUY_X_GET_Y" ? "BUY_X_GET_Y" : "QUANTITY_VOLUME_DISCOUNT";
+      : kind === "BUY_X_GET_Y" ? "BUY_X_GET_Y"
+      : kind === "QUANTITY_VOLUME_DISCOUNT" ? "QUANTITY_VOLUME_DISCOUNT" : null;
+    if (!type) throw new Error("RETAIL_PROMOTION_TYPE_UNSUPPORTED:" + kind);
     return {
       id: String(row.id),
       tenantId: String(row.tenantId),
@@ -129,7 +131,8 @@ export class RetailService {
     const getQuantity = promo.getQuantity == null ? null : Number(promo.getQuantity);
     const minQuantity = promo.minQuantity == null ? null : Number(promo.minQuantity);
     if (kind === "BUY_X_GET_Y" &&
-        (!Number.isFinite(buyQuantity) || Number(buyQuantity) <= 0 || !Number.isFinite(getQuantity) || Number(getQuantity) <= 0)) {
+        (!Number.isSafeInteger(buyQuantity) || Number(buyQuantity) <= 0 ||
+          !Number.isSafeInteger(getQuantity) || Number(getQuantity) <= 0)) {
       throw new Error("RETAIL_PROMOTION_BUY_GET_QUANTITY_REQUIRED");
     }
     if (kind === "QUANTITY_VOLUME_DISCOUNT" && (!Number.isFinite(minQuantity) || Number(minQuantity) <= 0)) {

@@ -81,21 +81,23 @@ describe("Retail durable promotion and audit lifecycle", () => {
     expect(earn.pointsBalance).toBe(100);
     expect(earn.duplicate).toBe(false);
 
-    const idempotencyKey = "loyalty-redeem-" + randomUUID();
-    const firstRedemption = await globalRetailParityService.redeemLoyaltyPoints(ctx, {
-      customerId, points: 50, basketAmount: 10, idempotencyKey,
+    const duplicateAdjustment = await globalRetailParityService.adjustLoyaltyPoints(ctx, {
+      customerId, pointsDelta: 100, idempotencyKey: earn.entry.idempotencyKey,
+      reason: "Retry the exact opening points adjustment",
     });
-    expect(firstRedemption.pointsBalance).toBe(50);
-    expect(firstRedemption.duplicate).toBe(false);
+    expect(duplicateAdjustment.pointsBalance).toBe(100);
+    expect(duplicateAdjustment.duplicate).toBe(true);
 
-    const retry = await globalRetailParityService.redeemLoyaltyPoints(ctx, {
-      customerId, points: 50, basketAmount: 10, idempotencyKey,
+    const quote = await globalRetailParityService.quoteLoyaltyRedemption(ctx, {
+      customerId, points: 50, basketAmount: 10,
     });
-    expect(retry.pointsBalance).toBe(50);
-    expect(retry.duplicate).toBe(true);
+    expect(quote.pointsRemaining).toBe(50);
+    expect(quote.monetaryValue).toBe(0.5);
+    expect(quote.requiresCheckout).toBe(true);
 
-    await expect(globalRetailParityService.redeemLoyaltyPoints(ctx, {
-      customerId, points: 500, basketAmount: 10, idempotencyKey: "loyalty-overdraw-" + randomUUID(),
+    await expect(globalRetailParityService.adjustLoyaltyPoints(ctx, {
+      customerId, pointsDelta: -500, idempotencyKey: "loyalty-overdraw-" + randomUUID(),
+      reason: "Rejected attempt to overdraw points",
     })).rejects.toThrow("LOYALTY_INSUFFICIENT_POINTS");
 
     const otherBranchId = randomUUID();
@@ -106,7 +108,7 @@ describe("Retail durable promotion and audit lifecycle", () => {
       .rejects.toThrow("LOYALTY_CUSTOMER_NOT_FOUND_IN_ACTIVE_SCOPE");
 
     const ledger = await prisma.loyaltyLedgerEntry.findMany({ where: { tenantId, branchId, customerId } });
-    expect(ledger).toHaveLength(2);
+    expect(ledger).toHaveLength(1);
     await expect(prisma.loyaltyLedgerEntry.update({
       where: { id: ledger[0].id },
       data: { reason: "Attempted mutation must fail" },

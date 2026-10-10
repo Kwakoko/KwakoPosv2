@@ -10,7 +10,7 @@ describe("Super Admin Production Lock", () => {
   });
 
   it("contains an independent fail-closed lock contract", () => {
-    execFileSync("npx", ["tsx", "scripts/certification/super-admin-production-lock.ts"], { stdio: "pipe" });
+    execFileSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/certification/super-admin-production-lock.ts"], { stdio: "pipe" });
   });
   it("protects the platform Super Admin role from tenant RBAC and provisioning permission escalation", async () => {
     const fs = await import("node:fs");

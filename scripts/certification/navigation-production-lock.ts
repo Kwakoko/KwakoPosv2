@@ -11,13 +11,13 @@ const EXPECTED_SUBITEM_COUNT = 659;
 
 const LOCKED_BLOBS: Record<string, string> = {
   "package.json": "dc0bdaae20acfde9c106e1c9617430fd26162d87",
-  "apps/web/src/App.tsx": "a67c77edd34362b241599ed2b5f28b6f55a7acd2",
+  "apps/web/src/App.tsx": "05df7e4204f07cd36eb842048590ad78f8e35997",
   "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
   "apps/web/src/pages/VerticalCommandCenterPage.tsx": "dc932c2adf63194e6af11ed340be7ba43f9d498f",
-  "apps/web/src/pages/DashboardPage.tsx": "efdd50c89ebe793382c3b976558a9fbdab4d7701",
+  "apps/web/src/pages/DashboardPage.tsx": "af44071fcd73c846c61a3c3f522bc2d390978f78",
   "apps/web/src/pages/InventoryPage.tsx": "1aada87ec4442b426973a2bba97c3d920fa86f04",
   "apps/web/src/pages/PurchasingPage.tsx": "48316f1d470fd9d3974a16b6fb05e11132e900bc",
-  "apps/web/src/pages/ReportsPage.tsx": "0215ab6d294a164bc3c83b22717e73abcea27cee",
+  "apps/web/src/pages/ReportsPage.tsx": "070e178a5cb25b1c586162e7301609b5080f9b12",
   "apps/web/src/pages/SettingsPage.tsx": "bae3919e787d81c2a3a8a6e9f9aba3a6e0350a1a",
   "apps/web/src/pages/CashDrawerPage.tsx": "8f57d8586a833d37aee9f37d99efad869fcb607e",
   "apps/web/src/pages/ReceiptsPage.tsx": "d5744e2e5f5f89b78c162727fe6b9978776bf44a",

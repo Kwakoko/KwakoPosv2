@@ -15,6 +15,8 @@ req(!api.includes("refresh-token"), "web client must not contain refresh-token h
 req(!srv.includes('createHash("sha256").update(password + getJwtSecret())'), "password verification must not use the legacy secret-dependent SHA-256 fallback");
 req(srv.includes("HttpOnly") && srv.includes("SameSite=Strict") && srv.includes('; Secure'), "production refresh cookie must use the HttpOnly; Secure; SameSite=Strict design");
 req(srv.includes("setRefreshCookie(reply, session.refreshToken"), "canonical login must issue refresh token via hardened cookie");
+req(!srv.includes("Bearer\\\\s+"), "session endpoint Bearer parsing must match a normal Authorization header");
+req(srv.includes('!/^\\/auth\\/session(?:\\/|$)/.test(authenticatedPath)'), "legal acceptance gate must permit authenticated session lifecycle checks");
 req(srv.includes("setRefreshCookie(reply, rotated.refreshToken"), "canonical refresh must rotate refresh token via hardened cookie");
 req(/reply\.send\(\{ success: true, data: \{ accessToken: rotated\.accessToken, sessionId:/.test(srv), "canonical refresh JSON must contain accessToken/sessionId only");
 req(!/reply\.send\(\{\s*success:\s*true,\s*data:\s*\{[^}]*\brefreshToken\b/s.test(srv), "authentication JSON must never return refreshToken");

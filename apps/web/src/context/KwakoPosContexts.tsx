@@ -481,7 +481,8 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       branchCode: stored.user.branchCode,
     };
   });
-  const [isInitializing, setIsInitializing] = useState(() => !getStoredSession()?.user);
+  // Keep the application shell behind the initialization screen until session refresh settles.
+  const [isInitializing, setIsInitializing] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [theme, setTheme] = useState<"dark" | "light">(() =>
     typeof localStorage !== "undefined" && localStorage.getItem("kwakopos:v2:theme") === "light" ? "light" : "dark",
@@ -548,19 +549,14 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     setIsInitializing(false);
   }, []);
 
+  const [sessionRestoreComplete, setSessionRestoreComplete] = useState(false);
+
   useEffect(() => {
     let active = true;
 
-    // Hard ceiling: the UI should NEVER stay in initializing state for more than 2500ms
-    const safetyTimer = setTimeout(() => {
-      if (active) {
-        setIsInitializing(false);
-      }
-    }, 2500);
-
     const initSequence = async () => {
       try {
-        // Step 1: Wait for local database with a 1500ms race ceiling
+        // Bound database readiness independently; never use this timeout to skip auth restoration.
         await Promise.race([
           db.ready.catch((err) => {
             console.warn("IndexedDB ready signal warned:", err);
@@ -568,14 +564,12 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
           new Promise((resolve) => setTimeout(resolve, 1500)),
         ]);
 
-        // Step 2: Attempt session restoration with a 1500ms race ceiling
-        const restored = await Promise.race([
-          restoreSession().catch((err) => {
-            console.warn("Session restore attempt warned:", err);
-            return null;
-          }),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
-        ]);
+        // Keep protected API and sync work gated until the refresh request has settled.
+        // A short timeout here previously made slow refresh requests look like logged-out sessions.
+        const restored = await restoreSession().catch((err) => {
+          console.warn("Session restore attempt warned:", err);
+          return null;
+        });
 
         if (active && restored) {
           setUser({
@@ -586,24 +580,47 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
             tenantId: restored.tenantId,
             branchId: restored.branchId,
           });
+        } else if (active) {
+          // A definitive refresh rejection means the durable identity is not a valid session.
+          setUser(null);
         }
       } catch (error) {
         if (active) {
           setAuthError(error instanceof Error ? error.message : "Session restore failed");
         }
       } finally {
-        clearTimeout(safetyTimer);
         if (active) {
+          setSessionRestoreComplete(true);
           setIsInitializing(false);
         }
       }
     };
 
+    const retrySessionRestore = async () => {
+      if (!active || !navigator.onLine || getAccessToken()) return;
+      const restored = await restoreSession().catch((err) => {
+        console.warn("[Session] Retry after reconnect/focus deferred:", err);
+        return null;
+      });
+      if (!active || !restored || !getAccessToken()) return;
+      setUser({
+        id: restored.id,
+        name: restored.name,
+        email: restored.email,
+        role: restored.role,
+        tenantId: restored.tenantId,
+        branchId: restored.branchId,
+      });
+    };
+
     void initSequence();
+    window.addEventListener("online", retrySessionRestore);
+    window.addEventListener("focus", retrySessionRestore);
 
     return () => {
       active = false;
-      clearTimeout(safetyTimer);
+      window.removeEventListener("online", retrySessionRestore);
+      window.removeEventListener("focus", retrySessionRestore);
     };
   }, [db]);
 
@@ -758,7 +775,19 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       setSessionStatus(isOnline ? "AUTHENTICATED_ONLINE" : "AUTHENTICATED_OFFLINE");
       setSessionWarningOpen(false);
     } catch (error) {
-      await terminateSession("SESSION_TIMEOUT", true, true);
+      const status = Number((error as any)?.status || 0);
+      const code = String((error as any)?.code || "");
+      if (
+        status === 401 &&
+        ["SESSION_EXPIRED", "SESSION_REVOKED", "TOKEN_INVALID", "AUTH_REQUIRED", "UNAUTHORIZED"].includes(code)
+      ) {
+        await terminateSession(code === "SESSION_REVOKED" ? "SESSION_REVOKED" : "SESSION_TIMEOUT", true, true);
+      } else {
+        // A timeout, offline transition, 5xx, or permission/configuration failure
+        // is not proof that the server session expired.
+        setSessionStatus(isOnline ? "AUTHENTICATED_ONLINE" : "AUTHENTICATED_OFFLINE");
+        console.warn("[Session] Session refresh deferred after a non-terminal failure:", error);
+      }
       throw error;
     }
   }, [user, sessionStatus, isOnline, terminateSession]);
@@ -771,7 +800,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   }, [user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!sessionRestoreComplete || !user || !getAccessToken()) return;
     if (!isOnline) {
       const absolute = sessionExpiresAt || (Date.now() + sessionPolicy.absoluteTimeoutMs);
       const offlineUntil = Math.min(absolute, Date.now() + sessionPolicy.offlineGracePeriodMs);
@@ -819,14 +848,27 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
         });
         void apiRecordSessionEvent("SESSION_RESTORED", { source: "session-validate" });
       })
-      .catch(async () => {
-        if (alive && navigator.onLine) await terminateSession("SESSION_TIMEOUT", true, true);
+      .catch(async (error) => {
+        if (!alive || !navigator.onLine) return;
+        const status = Number((error as any)?.status || 0);
+        const code = String((error as any)?.code || "");
+        // Only a server-confirmed invalid/expired/revoked session may terminate auth.
+        // Network errors, 5xx responses, and permission/configuration failures are transient
+        // from the session manager's perspective and must not clear a user's session.
+        if (
+          status === 401 &&
+          ["SESSION_EXPIRED", "SESSION_REVOKED", "TOKEN_INVALID", "AUTH_REQUIRED", "UNAUTHORIZED"].includes(code)
+        ) {
+          await terminateSession(code === "SESSION_REVOKED" ? "SESSION_REVOKED" : "SESSION_TIMEOUT", true, true);
+          return;
+        }
+        console.warn("[Session] Validation deferred after a non-terminal failure:", error);
       });
     return () => { alive = false; };
-  }, [user, isOnline, sessionExpiresAt, sessionPolicy.absoluteTimeoutMs, sessionPolicy.offlineGracePeriodMs, terminateSession]);
+  }, [user, isOnline, sessionExpiresAt, sessionPolicy.absoluteTimeoutMs, sessionPolicy.offlineGracePeriodMs, terminateSession, sessionRestoreComplete]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!sessionRestoreComplete || !user) return;
     const id = window.setInterval(() => {
       const now = Date.now();
       setSessionNow(now);
@@ -859,7 +901,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       }
     }, 1_000);
     return () => window.clearInterval(id);
-  }, [user, isOnline, offlineExpiresAt, sessionExpiresAt, sessionLastActivityAt, sessionPolicy, sessionWarningOpen, terminateSession]);
+  }, [user, isOnline, offlineExpiresAt, sessionExpiresAt, sessionLastActivityAt, sessionPolicy, sessionWarningOpen, terminateSession, sessionRestoreComplete]);
 
   useEffect(() => sessionSyncService.subscribe((event) => {
     if (!user) return;
@@ -1070,9 +1112,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   const consecutiveFailuresRef = useRef<number>(0);
   const hasBootReconciledRef = useRef(false);
   const outboxDebounceTimerRef = useRef<any>(null);
-  // Ensure clientSyncEngine is initialized with DB + API references
+  // Ensure clientSyncEngine is initialized with DB + API references only after
+  // session restoration has completed. Never sync against placeholder tenant/user IDs.
   useEffect(() => {
-    const targetTenantId = user?.tenantId || currentTenantId || "tenant-default";
+    if (!sessionRestoreComplete || !user) return;
+    const targetTenantId = user.tenantId || currentTenantId || "tenant-default";
     const targetBranchId = user?.branchId || currentBranchId || "branch-default";
     const targetUserId = user?.id || "user-default";
 
@@ -1104,10 +1148,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       tenantId: targetTenantId,
       branchId: targetBranchId,
     });
-  }, [db, user, currentTenantId, currentBranchId]);
+  }, [db, user, currentTenantId, currentBranchId, sessionRestoreComplete]);
 
   const syncOutbox = useCallback(async (options?: { quiet?: boolean; force?: boolean }) => {
-    if (!isOnline) return;
+    // No sync endpoint (including delta/bootstrap) may run until a restored user exists.
+    if (!sessionRestoreComplete || !user || !getAccessToken() || !isOnline) return;
     if (isSyncInProgressRef.current) return;
     isSyncInProgressRef.current = true;
 
@@ -1251,12 +1296,12 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       isSyncInProgressRef.current = false;
       setIsSyncing(false);
     }
-  }, [user, currentTenantId, currentBranchId, isOnline, db, syncEngine]);
+  }, [user, currentTenantId, currentBranchId, isOnline, db, syncEngine, sessionRestoreComplete]);
 
   // Force-bootstrap: wipe local IndexedDB and re-fetch from authoritative server snapshot.
   // Triggered by UI button or `kwakopos:force-bootstrap` window event.
   const forceBootstrap = useCallback(async () => {
-    if (!isOnline) return;
+    if (!sessionRestoreComplete || !user || !getAccessToken() || !isOnline) return;
     const targetTenantId = user?.tenantId || currentTenantId || "tenant-default";
     const targetBranchId = user?.branchId || currentBranchId || "branch-default";
     setIsSyncing(true);

@@ -3,11 +3,13 @@ const lazyPage = (loader: () => Promise<{ default: React.ComponentType<any> }>):
   lazy(loader) as React.ComponentType<any>;
 import { KwakoPosProvider, useAuth, useModule, useRbac } from "./context/KwakoPosContexts.js";
 import { apiFetch, getStoredSession } from "./services/applicationApiService.js";
+import { isPlatformOnlyPath, isPlatformSuperAdminRole, shouldUsePlatformShell } from "./utils/platformRole.js";
 import { WindowManagerProvider } from "./context/WindowManagerContext.js";
 import { ToastProvider } from "./components/UI/Toast.js";
 import { ProductionErrorBoundary } from "./components/UI/ProductionErrorBoundary.js";
 const LoginPage = lazyPage(() => import("./pages/LoginPage.js").then((m) => ({ default: m.LoginPage })));
 const SystemAppShellLayout = lazyPage(() => import("./layouts/SystemAppShellLayout.js").then((m) => ({ default: m.SystemAppShellLayout })));
+import { SuperAdminShellLayout } from "./layouts/SuperAdminShellLayout.js";
 const TenantOnboardingPage = lazyPage(() => import("./pages/TenantOnboardingPage.js").then((m) => ({ default: m.TenantOnboardingPage })));
 const SupportOperationsPage = lazyPage(() => import("./pages/SupportOperationsPage.js").then((m) => ({ default: m.SupportOperationsPage })));
 const SuperAdminSupportControlTowerPage = lazyPage(() => import("./pages/SuperAdminSupportControlTowerPage.js").then((m) => ({ default: m.SuperAdminSupportControlTowerPage })));
@@ -122,11 +124,11 @@ const TAB_TO_PATH: Record<string, string> = {
   // Inventory
   Inventory: "/inventory",
   "Inventory Overview": "/inventory",
-  Products: "/inventory",
+  Products: "/inventory/products",
   "Categories & Brands": "/inventory",
   "Stock Adjustment": "/inventory",
   "Stock Transfer": "/inventory",
-  "Stock Alerts": "/inventory",
+  "Stock Alerts": "/inventory/stock-alerts",
   "Stock Sync Engine": "/inventory",
   "Product Bundles & Kits": "/inventory",
   "Stock Count": "/inventory",
@@ -155,7 +157,9 @@ const TAB_TO_PATH: Record<string, string> = {
   Reports: "/reports",
   Sales: "/reports",
   Profit: "/reports",
-  "Inventory Valuation": "/reports",
+  "Sales Today": "/reports/sales-today",
+  "Profit Today": "/reports/profit-today",
+  "Inventory Valuation": "/reports/inventory-valuation",
   Tax: "/reports",
   "Customers Report": "/reports",
   "Expenses Report": "/reports",
@@ -166,7 +170,7 @@ const TAB_TO_PATH: Record<string, string> = {
   "Returns & Refunds": "/reports",
   "Branch Comparison": "/reports",
   "Cashier Performance": "/reports",
-  "Receivables Aging": "/reports",
+  "Receivables Aging": "/reports/receivables-aging",
   // Employees & Roles
   Employees: "/users",
   "Users & Roles": "/users",
@@ -302,10 +306,16 @@ const PATH_TO_CANONICAL_TAB: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/pos": "POS",
   "/inventory": "Inventory",
+  "/inventory/products": "Products",
+  "/inventory/stock-alerts": "Stock Alerts",
   "/customers": "Customers",
   "/purchasing": "Purchasing",
   "/finance": "Finance",
   "/reports": "Reports",
+  "/reports/sales-today": "Sales Today",
+  "/reports/profit-today": "Profit Today",
+  "/reports/inventory-valuation": "Inventory Valuation",
+  "/reports/receivables-aging": "Receivables Aging",
   "/settings": "Settings",
   "/administration": "Administration",
   "/users": "Users & Roles",
@@ -384,7 +394,7 @@ const ALLOWED_SUPER_ADMIN_PATHS = new Set([
 ]);
 
 const AuthenticatedApp: React.FC = () => {
-  const { user, isAuthenticated, isInitializing, dismissLoading, impersonatedTenant } = useAuth();
+  const { user, isAuthenticated, isInitializing, dismissLoading, impersonatedTenant, stopImpersonation } = useAuth();
   const { activeTab, setActiveTab, manifest } = useModule();
   const { permissions: rbacPermissions } = useRbac();
   const [currentPath, setCurrentPath] = useState(() =>
@@ -392,6 +402,7 @@ const AuthenticatedApp: React.FC = () => {
   );
   const initialRouteSyncRef = useRef(true);
   const explicitNavigationPathRef = useRef<string | null>(null);
+  const platformInspectionExitRef = useRef(false);
   const [hasEnteredWorkspace, setHasEnteredWorkspace] = useState(() =>
     Boolean(getStoredSession()?.user)
   );
@@ -400,10 +411,8 @@ const AuthenticatedApp: React.FC = () => {
   );
   const [legalGateNonce, setLegalGateNonce] = useState(0);
 
-  const isSuperAdmin = Boolean(
-    user && String(user.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"
-  );
-  const platformContextLocked = isSuperAdmin && !impersonatedTenant;
+  const isSuperAdmin = Boolean(user && isPlatformSuperAdminRole(user.role));
+  const platformContextLocked = shouldUsePlatformShell(user?.role, Boolean(impersonatedTenant));
   const canAdminister = Boolean(
     user && (
       ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(String(user.role || "").toUpperCase()) ||
@@ -450,7 +459,7 @@ const AuthenticatedApp: React.FC = () => {
       if (PATH_TO_CANONICAL_TAB[path]) {
         setActiveTab(PATH_TO_CANONICAL_TAB[path]);
       } else if (!STANDALONE_PATHS.has(path)) {
-        setActiveTab(user?.role === "SUPER_ADMIN" && !impersonatedTenant ? "Super Admin" : "Dashboard");
+        setActiveTab(isPlatformSuperAdminRole(user?.role) && !impersonatedTenant ? "Super Admin" : "Dashboard");
       }
     };
     window.addEventListener("popstate", onPop);
@@ -508,6 +517,21 @@ const AuthenticatedApp: React.FC = () => {
   useEffect(() => {
     if (!user) return;
 
+    if (!impersonatedTenant) platformInspectionExitRef.current = false;
+
+    // A platform-only route must never render in the tenant shell during an
+    // inspection. Close the inspected context first; fail closed to the tenant
+    // dashboard if server-side context restoration fails.
+    if (isSuperAdmin && impersonatedTenant && isPlatformOnlyPath(currentPath)) {
+      if (platformInspectionExitRef.current) return;
+      platformInspectionExitRef.current = true;
+      void stopImpersonation().catch(() => {
+        platformInspectionExitRef.current = false;
+        handleNavigate("/");
+      });
+      return;
+    }
+
     if (platformContextLocked) {
       // Platform Super Admin is strictly locked to the Platform Control Tower
       if (!ALLOWED_SUPER_ADMIN_PATHS.has(currentPath)) {
@@ -519,7 +543,7 @@ const AuthenticatedApp: React.FC = () => {
         handleNavigate("/");
       }
     }
-  }, [isSuperAdmin, impersonatedTenant, currentPath, user]);
+  }, [isSuperAdmin, impersonatedTenant, currentPath, user, platformContextLocked, stopImpersonation]);
 
   // Stay on WorkspaceLoadingScreen until user explicitly clicks Enter (only on first-time unauthenticated visit)
   if (!hasEnteredWorkspace && !user) {
@@ -595,7 +619,7 @@ const AuthenticatedApp: React.FC = () => {
             if (typeof window !== "undefined" && window.location.pathname !== "/tenant-onboarding") {
               window.history.pushState({}, "", "/tenant-onboarding");
             }
-          } else if (user?.role && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase())) {
+          } else if (isPlatformSuperAdminRole(user?.role)) {
             handleNavigate("/super-admin");
           } else {
             setActiveTab("Dashboard");
@@ -606,6 +630,15 @@ const AuthenticatedApp: React.FC = () => {
   }
 
   const renderView = () => {
+    // Never mount platform-control pages beneath the tenant shell while an inspection is active.
+    if (isSuperAdmin && impersonatedTenant && isPlatformOnlyPath(currentPath)) {
+      return (
+        <div role="status" aria-live="polite" style={{ padding: "2rem", color: "#cbd5e1" }}>
+          Restoring the platform control context…
+        </div>
+      );
+    }
+
     // Platform Isolation Guard: Super Admin without impersonation cannot render tenant store views
     if (platformContextLocked && !ALLOWED_SUPER_ADMIN_PATHS.has(currentPath)) {
       return <SuperAdminPage onNavigate={handleNavigate} />;
@@ -655,6 +688,10 @@ const AuthenticatedApp: React.FC = () => {
         return <PosPage onNavigate={handleNavigate} activeTab={activeTab} />;
       case "/inventory":
         return <InventoryPage activeTab={activeTab} />;
+      case "/inventory/products":
+        return <InventoryPage activeTab="Products" />;
+      case "/inventory/stock-alerts":
+        return <InventoryPage activeTab="Stock Alerts" />;
       case "/customers":
         return <CustomersPage activeTab={activeTab} />;
       case "/purchasing":
@@ -663,6 +700,14 @@ const AuthenticatedApp: React.FC = () => {
         return <FinancePage />;
       case "/reports":
         return <ReportsPage activeTab={activeTab} />;
+      case "/reports/sales-today":
+        return <ReportsPage activeTab="Sales Today" />;
+      case "/reports/profit-today":
+        return <ReportsPage activeTab="Profit Today" />;
+      case "/reports/inventory-valuation":
+        return <ReportsPage activeTab="Inventory Valuation" />;
+      case "/reports/receivables-aging":
+        return <ReportsPage activeTab="Receivables Aging" />;
       case "/settings":
         return <SettingsPage activeTab={activeTab} />;
       case "/administration":
@@ -710,8 +755,8 @@ const AuthenticatedApp: React.FC = () => {
     }
   };
 
-  return (
-    <>
+  const pageContent = (
+    <ProductionErrorBoundary>
       <Suspense
         fallback={
           <div style={{ padding: "1.5rem", width: "100%", maxWidth: "1600px", margin: "0 auto" }}>
@@ -719,33 +764,45 @@ const AuthenticatedApp: React.FC = () => {
           </div>
         }
       >
-        <SystemAppShellLayout
-          currentPath={currentPath}
-          canAdminister={canAdminister}
-          onNavigate={handleNavigate}
-          resolveTabPath={(tab: string, parentName?: string) => {
-            const crossWorkspaceRoute = SIDEBAR_CROSS_WORKSPACE_ROUTES[tab];
-            if (crossWorkspaceRoute) return crossWorkspaceRoute;
-            if (parentName && CORE_WORKSPACE_PARENT_ROUTES.has(parentName)) {
-              return TAB_TO_PATH[parentName];
-            }
-            return currentPath;
-          }}
-        >
-          <ProductionErrorBoundary>
-          <Suspense
-            fallback={
-              <div style={{ padding: "1.5rem", width: "100%", maxWidth: "1600px", margin: "0 auto" }}>
-                <SkeletonDashboard />
-              </div>
-            }
-          >
-            {renderView()}
-          </Suspense>
-          </ProductionErrorBoundary>
-        </SystemAppShellLayout>
+        {renderView()}
       </Suspense>
-    </>
+    </ProductionErrorBoundary>
+  );
+
+  // Platform Super Admin gets a dedicated platform shell. The tenant application
+  // shell only mounts for tenant accounts or an explicitly active tenant inspection.
+  if (platformContextLocked) {
+    return (
+      <SuperAdminShellLayout currentPath={currentPath} onNavigate={handleNavigate}>
+        {pageContent}
+      </SuperAdminShellLayout>
+    );
+  }
+
+  return (
+    <Suspense
+      fallback={
+        <div style={{ padding: "1.5rem", width: "100%", maxWidth: "1600px", margin: "0 auto" }}>
+          <SkeletonDashboard />
+        </div>
+      }
+    >
+      <SystemAppShellLayout
+        currentPath={currentPath}
+        canAdminister={canAdminister}
+        onNavigate={handleNavigate}
+        resolveTabPath={(tab: string, parentName?: string) => {
+          const crossWorkspaceRoute = SIDEBAR_CROSS_WORKSPACE_ROUTES[tab];
+          if (crossWorkspaceRoute) return crossWorkspaceRoute;
+          if (parentName && CORE_WORKSPACE_PARENT_ROUTES.has(parentName)) {
+            return TAB_TO_PATH[parentName];
+          }
+          return currentPath;
+        }}
+      >
+        {pageContent}
+      </SystemAppShellLayout>
+    </Suspense>
   );
 };
 

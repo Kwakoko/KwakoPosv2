@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { execFileSync } from "node:child_process";
 
 const dir = typeof __dirname !== "undefined"
   ? __dirname
@@ -29,14 +30,43 @@ if (!fs.existsSync(releaseManifestPath)) {
 
 const releaseManifest = JSON.parse(fs.readFileSync(releaseManifestPath, "utf8"));
 const version = String(releaseManifest.version || "2.13.0");
-const gitSha = String(
-  releaseManifest.gitSha ||
-  process.env.GITHUB_SHA ||
-  process.env.COMMIT_SHA ||
-  process.env.GIT_SHA ||
-  ""
-);
-if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error("RELEASE_MANIFEST_INVALID: exact Git SHA is required to build PWA assets.");
+function isFullGitSha(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{40}$/i.test(value.trim());
+}
+
+function resolveBuildGitSha(): string {
+  // Prefer authoritative release/CI metadata when it contains a valid full SHA.
+  const candidates: unknown[] = [
+    releaseManifest.gitSha,
+    process.env.GITHUB_SHA,
+    process.env.COMMIT_SHA,
+    process.env.GIT_SHA,
+  ];
+
+  for (const candidate of candidates) {
+    if (isFullGitSha(candidate)) return candidate.trim();
+  }
+
+  // Development manifests intentionally keep gitSha=null. Resolve the real
+  // checkout revision so a local build does not need a manually supplied env var.
+  try {
+    const headSha = execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (isFullGitSha(headSha)) return headSha;
+  } catch {
+    // Keep the build fail-closed below if neither metadata nor Git is available.
+  }
+
+  throw new Error(
+    "RELEASE_MANIFEST_INVALID: exact 40-character Git SHA is required to build PWA assets. " +
+    "Provide a valid release-manifest gitSha, GITHUB_SHA/COMMIT_SHA/GIT_SHA, or build from a Git checkout."
+  );
+}
+
+const gitSha = resolveBuildGitSha();
 const rawBuildNumber = releaseManifest.buildNumber || 584;
 const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 const buildNumber = `${dateStr}.${rawBuildNumber}`;

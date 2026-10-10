@@ -58,9 +58,17 @@ async function defaultDeltaApi(since?: string): Promise<SyncDeltaResponse> {
   return body.data || body;
 }
 
-async function defaultBootstrapApi(req: SyncBootstrapRequest): Promise<SyncBootstrapResponse> {
+async function defaultBootstrapApi(
+  req: SyncBootstrapRequest,
+  tenantId?: string,
+  branchId?: string,
+): Promise<SyncBootstrapResponse> {
   const body = await apiFetch<any>("/sync/bootstrap", {
     method: "POST",
+    headers: {
+      ...(tenantId ? { "x-tenant-id": tenantId } : {}),
+      ...(branchId ? { "x-branch-id": branchId } : {}),
+    },
     body: JSON.stringify(req),
   });
   return body.data || body;
@@ -673,7 +681,11 @@ export class ClientSyncEngine {
         console.info(
           `[SYNC] Journal compaction gap detected (client cursor rev:${lastRevision} was pruned; journal min is rev:${deltaRes.compactionMinRevision}). Initiating authoritative snapshot bootstrap.`
         );
-        const bootstrapRes = await this.bootstrapWithServer(defaultBootstrapApi, effectiveTenantId, effectiveBranchId);
+        const bootstrapRes = await this.bootstrapWithServer(
+            (req) => defaultBootstrapApi(req, effectiveTenantId, effectiveBranchId),
+            effectiveTenantId,
+            effectiveBranchId,
+          );
         totalPulled = bootstrapRes.applied;
         await this.localDb.refreshStoresFromNative([
           "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
@@ -750,7 +762,11 @@ export class ClientSyncEngine {
       }
       if (reconciliation && !reconciliation.inSync) {
         console.warn("[SYNC] Replica divergence detected; executing authoritative bootstrap", reconciliation);
-        const bootstrapRes = await this.bootstrapWithServer(defaultBootstrapApi, effectiveTenantId, effectiveBranchId);
+        const bootstrapRes = await this.bootstrapWithServer(
+            (req) => defaultBootstrapApi(req, effectiveTenantId, effectiveBranchId),
+            effectiveTenantId,
+            effectiveBranchId,
+          );
         totalPulled += bootstrapRes.applied;
         await this.localDb.refreshStoresFromNative([
           "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",

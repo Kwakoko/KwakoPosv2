@@ -93,7 +93,27 @@ const liveTotpLeakMarker = ["current","Otp"].join("");
 requireAbsent("apps/api/src/services/superAdminSecurityService.ts", liveTotpLeakMarker);
 requireAbsent("apps/api/src/services/superAdminSecurityService.ts", "verifyWebAuthnResponse", "mock WebAuthn verification is forbidden in production security paths");
 
-// 8. No client-side email-based platform-root bypass.
+// 8. Frontend platform-shell selection and redirects share the dedicated platform role.
+requireText("apps/web/src/utils/platformRole.ts", 'String(role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"', "canonical platform-role predicate");
+requireText("apps/web/src/utils/platformRole.ts", "export function isPlatformOnlyPath(path: unknown): boolean", "platform-only route classifier");
+requireText("apps/web/src/utils/platformRole.ts", "export function shouldUsePlatformShell(role: unknown, hasActiveTenantInspection: boolean): boolean", "shell requires platform role outside inspection");
+requireText("apps/web/src/App.tsx", 'import { isPlatformOnlyPath, isPlatformSuperAdminRole, shouldUsePlatformShell } from "./utils/platformRole.js";', "app uses canonical platform-role and routing predicates");
+requireText("apps/web/src/App.tsx", 'import { SuperAdminShellLayout } from "./layouts/SuperAdminShellLayout.js";', "dedicated platform shell import");
+requireText("apps/web/src/App.tsx", "const platformContextLocked = shouldUsePlatformShell(user?.role, Boolean(impersonatedTenant));", "platform shell selection respects tenant inspection context");
+requireText("apps/web/src/App.tsx", "isSuperAdmin && impersonatedTenant && isPlatformOnlyPath(currentPath)", "platform-only routes cannot render in tenant inspection");
+requireText("apps/web/src/App.tsx", "void stopImpersonation().catch", "platform-only route transitions restore platform context first");
+requireText("apps/web/src/App.tsx", "Restoring the platform control context", "platform route transition blocks platform page rendering while inspected");
+requireText("apps/web/src/App.tsx", "<SuperAdminShellLayout currentPath={currentPath} onNavigate={handleNavigate}>", "platform Super Admin is rendered outside tenant shell");
+requireText("apps/web/src/layouts/SuperAdminShellLayout.tsx", 'data-shell="platform-super-admin"', "distinct platform shell identity");
+requireAbsent("apps/web/src/layouts/SuperAdminShellLayout.tsx", "SystemAppShellLayout", "platform shell cannot nest the tenant shell");
+requireText("apps/web/src/App.tsx", "else if (isPlatformSuperAdminRole(user?.role))", "login routes only the platform role to the control tower");
+requireText("apps/web/src/App.tsx", 'setActiveTab(isPlatformSuperAdminRole(user?.role) && !impersonatedTenant', "history routing follows platform role and inspection context");
+requireAbsent("apps/web/src/App.tsx", '["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes', "legacy tenant roles cannot be routed into the platform tower");
+requireText("apps/web/src/layouts/SystemAppShellLayout.tsx", 'import { isPlatformSuperAdminRole } from "../utils/platformRole.js";', "shell uses canonical platform-role predicate");
+requireText("apps/web/src/layouts/SystemAppShellLayout.tsx", "Boolean(isSuperAdmin || isPlatformSuperAdminRole(user?.role))", "platform chrome and tenant navigation use the same role boundary");
+requireAbsent("apps/web/src/layouts/SystemAppShellLayout.tsx", '["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes', "top bar cannot classify tenant Super Admin roles as platform Super Admin");
+
+// 9. No client-side email-based platform-root bypass.
 for (const file of [
   "apps/web/src/App.tsx",
   "apps/web/src/layouts/SystemAppShellLayout.tsx",
@@ -145,7 +165,7 @@ requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'permissions.includes
 requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'permissions.includes("ADMIN:PLATFORM")', "permission cannot elevate to platform mode");
 requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'sessionStorage.getItem("kwakopos:v2:impersonation")', "client storage cannot unlock tenant inspection");
 requireText("apps/web/src/context/KwakoPosContexts.tsx", "useState<ImpersonatedTenant | null>(null)", "tenant impersonation state defaults closed");
-requireText("apps/web/src/layouts/SystemAppShellLayout.tsx", 'String(user?.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"', "shell platform role boundary");
+requireText("apps/web/src/layouts/SystemAppShellLayout.tsx", 'const isSuperAdminUser = Boolean(isSuperAdmin || isPlatformSuperAdminRole(user?.role));', "shell platform role boundary");
 requireAbsent("apps/api/src/server.ts", "ADM-001", "fabricated platform actor identity");
 requireAbsent("apps/api/src/server.ts", "ADM-SEC-01", "fabricated emergency actor identity");
 requireText("apps/api/src/routes/tenantOnboardingRoutes.ts", "isPlatformProvisioner", "platform tenant provisioning authority");

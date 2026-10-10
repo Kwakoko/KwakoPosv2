@@ -3,6 +3,7 @@ import {
   getStoredSession,
   setStoredSession,
   restoreSession,
+  validateSession,
   getAccessToken,
   setAccessToken,
   type StoredSession,
@@ -101,6 +102,131 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     expect(getAccessToken()).toBe(refreshedJwt);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy.mock.calls[0]?.[0]).toBe("/auth/refresh");
+  });
+
+  it("preserves the session identity when refresh has a transient online server failure", async () => {
+    const session: StoredSession = {
+      sessionId: "sess-transient-refresh",
+      user: {
+        id: "usr-01",
+        email: "cashier@kwakopos.com",
+        name: "Amina Cashier",
+        role: "CASHIER",
+        tenantId: "tnt-tz-01",
+        branchId: "br-kariakoo-01",
+      },
+    };
+    setStoredSession(session);
+    vi.stubGlobal("navigator", { onLine: true });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ success: false, error: { code: "SERVICE_UNAVAILABLE", message: "Try again" } }),
+    }));
+
+    const user = await restoreSession();
+
+    expect(user?.id).toBe("usr-01");
+    expect(getStoredSession()?.sessionId).toBe("sess-transient-refresh");
+    expect(getAccessToken()).toBeNull();
+  });
+
+  it("restores the same valid session repeatedly after access-token memory resets", async () => {
+    setStoredSession({
+      sessionId: "sess-repeat-refresh",
+      user: {
+        id: "usr-01",
+        email: "cashier@kwakopos.com",
+        name: "Amina Cashier",
+        role: "CASHIER",
+        tenantId: "tnt-tz-01",
+        branchId: "br-kariakoo-01",
+      },
+    });
+    vi.stubGlobal("navigator", { onLine: true });
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: { accessToken: "fresh-access-token" } }),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      setAccessToken(null);
+      const restored = await restoreSession();
+      expect(restored?.id).toBe("usr-01");
+      expect(getAccessToken()).toBe("fresh-access-token");
+    }
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("refreshes an expired access token before accepting session validation", async () => {
+    setStoredSession({
+      sessionId: "sess-validate-refresh",
+      user: {
+        id: "usr-01",
+        email: "cashier@kwakopos.com",
+        name: "Amina Cashier",
+        role: "CASHIER",
+        tenantId: "tnt-tz-01",
+        branchId: "br-kariakoo-01",
+      },
+    });
+    vi.stubGlobal("navigator", { onLine: true });
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ success: false, error: { code: "AUTH_REQUIRED", message: "Access token expired" } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: { accessToken: "refreshed-access-token" } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: { valid: true } }),
+      });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await validateSession();
+
+    expect(result.data.valid).toBe(true);
+    expect(getAccessToken()).toBe("refreshed-access-token");
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(fetchSpy.mock.calls.map((call) => call[0])).toEqual([
+      "/auth/session/validate",
+      "/auth/refresh",
+      "/auth/session/validate",
+    ]);
+  });
+
+  it("clears a session only when the server confirms it expired or was revoked", async () => {
+    setStoredSession({
+      sessionId: "sess-expired",
+      user: {
+        id: "usr-01",
+        email: "cashier@kwakopos.com",
+        name: "Amina Cashier",
+        role: "CASHIER",
+        tenantId: "tnt-tz-01",
+        branchId: "br-kariakoo-01",
+      },
+    });
+    vi.stubGlobal("navigator", { onLine: true });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ success: false, error: { code: "SESSION_EXPIRED", message: "Session expired" } }),
+    }));
+
+    const user = await restoreSession();
+
+    expect(user).toBeNull();
+    expect(getStoredSession()).toBeNull();
+    expect(getAccessToken()).toBeNull();
   });
 
   it("does NOT wipe stored session on refresh failures or network drops", async () => {

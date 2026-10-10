@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 const LOCK_ID = "ADMINISTRATION-PRODUCTION-LOCK-2026-10-08";
 
@@ -73,12 +73,11 @@ function read(file: string) {
   return fs.readFileSync(resolved, "utf8");
 }
 
-function blobSha(content: string) {
-  const bytes = Buffer.from(content, "utf8");
-  const hash = createHash("sha1");
-  hash.update(Buffer.from(`blob ${bytes.length}\0`, "utf8"));
-  hash.update(bytes);
-  return hash.digest("hex");
+function blobSha(content: string, filePath: string) {
+  return execFileSync("git", ["hash-object", "--path=" + filePath, "--stdin"], {
+    input: Buffer.from(content, "utf8"),
+    encoding: "utf8",
+  }).trim();
 }
 
 const failures: string[] = [];
@@ -97,7 +96,8 @@ for (const [name, file, ...needles] of MARKERS) {
 }
 
 try {
-  const serverSha = blobSha(read("apps/api/src/server.ts"));
+  const serverPath = "apps/api/src/server.ts";
+  const serverSha = blobSha(read(serverPath), serverPath);
   for (const lockFile of [
     "scripts/certification/sales-production-lock.ts",
     "scripts/certification/cash-management-production-lock.ts",

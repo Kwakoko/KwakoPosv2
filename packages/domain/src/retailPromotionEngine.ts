@@ -145,7 +145,7 @@ export function applyRetailPricingPromotions(
     if (appliedAmount > 0) {
       appliedPromotions.push({ id: promo.id, name: promo.name, discountAmount: appliedAmount });
       if (promo.stackable !== true) {
-        for (const { index } of eligible) {
+        for (let index = 0; index < items.length; index++) {
           if (Number(items[index].discountAmount || 0) > Number(inputLines[index].discountAmount || 0)) {
             nonStackableBlocked.add(index);
           }

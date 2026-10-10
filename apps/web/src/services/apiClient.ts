@@ -66,6 +66,17 @@ interface ApiErrorPayload {
   error?: { message?: string; code?: string };
 }
 
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: string,
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
 const SESSION_KEY = "kwakopos:v2:session";
 
 export function getStoredSession(): StoredSession | null {
@@ -134,6 +145,7 @@ export function setStoredSession(session: StoredSession | null): void {
 
 let accessToken: string | null = null;
 let refreshInFlight: Promise<string | null> | null = null;
+let lastRefreshError: unknown = null;
 
 export function getAccessToken(): string | null {
   if (accessToken) return accessToken;
@@ -170,9 +182,20 @@ async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, 
     });
 
     const body = (await response.json().catch(() => ({}))) as T & ApiErrorPayload & { data?: any };
-    if (response.status === 401 && allowRefresh && getStoredSession() && !String(input).includes("/auth/")) {
+    const requestPath = String(input);
+    const canRefreshAfterUnauthorized =
+      !requestPath.includes("/auth/") || requestPath.includes("/auth/session/validate");
+    if (response.status === 401 && allowRefresh && getStoredSession() && canRefreshAfterUnauthorized) {
       const refreshed = await refreshAccessToken();
       if (refreshed) return requestJson<T>(input, init, false);
+      // If refresh itself failed transiently, propagate that failure instead of treating
+      // the original 401 as proof that the session expired.
+      if (
+        lastRefreshError &&
+        (!(lastRefreshError instanceof ApiRequestError) || lastRefreshError.status >= 500)
+      ) {
+        throw lastRefreshError;
+      }
     }
     if (response.status === 428 && body?.error?.code === "SUPER_ADMIN_SETUP_REQUIRED") {
       throw new SuperAdminSetupRequiredError(body.error.message || "Super Admin security setup is required", body.data || {});
@@ -180,7 +203,13 @@ async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, 
     if (response.status === 401 && body?.error?.code === "MFA_REQUIRED") {
       throw new MfaRequiredError(body.error.message || "Valid Super Admin MFA code is required");
     }
-    if (!response.ok) throw new Error(body?.error?.message || `Request failed with HTTP ${response.status}`);
+    if (!response.ok) {
+      throw new ApiRequestError(
+        body?.error?.message || `Request failed with HTTP ${response.status}`,
+        response.status,
+        body?.error?.code,
+      );
+    }
     return body;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
@@ -189,6 +218,7 @@ async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, 
 
 async function refreshAccessToken(): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
+  lastRefreshError = null;
   refreshInFlight = (async () => {
     const stored = getStoredSession();
     if (!stored) return null;
@@ -207,6 +237,7 @@ async function refreshAccessToken(): Promise<string | null> {
         false,
       );
       if (!result.success || !result.data?.accessToken) return null;
+      lastRefreshError = null;
       accessToken = result.data.accessToken;
       setStoredSession({
         ...stored,
@@ -214,6 +245,7 @@ async function refreshAccessToken(): Promise<string | null> {
       });
       return accessToken;
     } catch (err) {
+      lastRefreshError = err;
       console.warn("[Session] Token refresh attempt deferred:", err);
       return null;
     } finally {
@@ -252,7 +284,7 @@ export async function refreshSession(): Promise<boolean> {
 }
 
 export async function validateSession(): Promise<any> {
-  return requestJson<any>("/auth/session/validate", { method: "GET" }, false);
+  return requestJson<any>("/auth/session/validate", { method: "GET" }, true);
 }
 
 export async function recordSessionEvent(event: string, metadata?: Record<string, unknown>): Promise<void> {
@@ -320,8 +352,22 @@ export async function restoreSession(): Promise<LoginResponseUser | null> {
     return getStoredSession()?.user || stored.user;
   }
 
-  // Only retain the durable identity when the browser is actually offline.
+  // Preserve the durable identity during a transient network/server failure, but do not
+  // treat it as online-authenticated until a bearer token has actually been restored.
   if (typeof navigator !== "undefined" && !navigator.onLine) return stored.user;
+  if (
+    lastRefreshError &&
+    (!(lastRefreshError instanceof ApiRequestError) || lastRefreshError.status >= 500)
+  ) {
+    return stored.user;
+  }
+  if (
+    lastRefreshError instanceof ApiRequestError &&
+    lastRefreshError.status === 401 &&
+    ["SESSION_EXPIRED", "SESSION_REVOKED", "TOKEN_INVALID"].includes(String(lastRefreshError.code || ""))
+  ) {
+    setStoredSession(null);
+  }
   return null;
 }
 

@@ -146,6 +146,33 @@ export class PrismaAtomicCommercialFinanceService {
         variantPrices.set(item.variantId, authoritativePrice);
         variantCosts.set(item.variantId, resolution.unitCost);
       }
+      const saleEffectiveAt = req.occurredAt ? new Date(req.occurredAt) : new Date();
+      if (!Number.isFinite(saleEffectiveAt.getTime())) throw new Error("SALE_DATE_INVALID");
+      const retailPromotions = await tx.pricingPromotion.findMany({
+        where: {
+          tenantId: ctx.tenantId,
+          sourceModule: "RETAIL",
+          isActive: true,
+          startAt: { lte: saleEffectiveAt },
+          endAt: { gt: saleEffectiveAt },
+          OR: [{ branchId: null }, { branchId: ctx.branchId }],
+        },
+        orderBy: [{ priority: "desc" }, { startAt: "desc" }, { id: "asc" }],
+      });
+      const promotionResult = applyRetailPricingPromotions(
+        req.items.map((item: any) => ({
+          ...item,
+          unitPrice: Number(variantPrices.get(item.variantId) ?? item.unitPrice),
+          discountAmount: Number(item.discountAmount || 0),
+        })),
+        retailPromotions as any,
+        saleEffectiveAt,
+      );
+      for (let i = 0; i < req.items.length; i++) {
+        req.items[i].discountAmount = promotionResult.items[i].discountAmount;
+      }
+      const promotionEvidence = promotionResult.appliedPromotions;
+
       if (saleDiscountRequested) {
         const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
         const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
@@ -224,16 +251,57 @@ export class PrismaAtomicCommercialFinanceService {
           lineTotal: c.lineTotal,
         };
       });
-      const totals = PricingTaxEngine.calculateSaleTotals(
-        lines.map((l: any) => ({
-          lineTotal: l.lineTotal,
-          totalCost: l.unitCost * l.quantity,
-          discountAmount: l.discountAmount,
-          taxAmount: l.taxAmount,
-        })),
-        req.discountTotal || 0,
-        taxConfig,
-      );
+      const saleLineTotals = lines.map((l: any) => ({
+        lineTotal: l.lineTotal,
+        totalCost: l.unitCost * l.quantity,
+        discountAmount: l.discountAmount,
+        taxAmount: l.taxAmount,
+      }));
+      let effectiveDiscountTotal = Number(req.discountTotal || 0);
+      let loyaltyRedemption: { points: number; value: number; customerId: string; programId: string } | null = null;
+      let totals = PricingTaxEngine.calculateSaleTotals(saleLineTotals, effectiveDiscountTotal, taxConfig);
+
+      const pointsToRedeem = req.loyaltyPointsRedeemed == null ? 0 : Number(req.loyaltyPointsRedeemed);
+      if (pointsToRedeem > 0) {
+        if (!Number.isSafeInteger(pointsToRedeem)) throw new Error("LOYALTY_REDEEM_POINTS_INVALID");
+        const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
+        const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+        const canRedeem = permissions.includes("*") || permissions.includes("loyalty.redeem") ||
+          permissions.includes("loyalty.manage") || roles.some((r: string) =>
+            ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+        if (!canRedeem) throw new Error("LOYALTY_REDEEM_PERMISSION_REQUIRED");
+        if (!req.customerId) throw new Error("LOYALTY_CUSTOMER_REQUIRED");
+
+        await tx.$queryRawUnsafe(
+          'SELECT "id" FROM "customers" WHERE "id" = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          req.customerId, ctx.tenantId, ctx.branchId,
+        );
+        const loyaltyCustomer = await tx.customer.findFirst({
+          where: { id: req.customerId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" },
+          select: { id: true },
+        });
+        if (!loyaltyCustomer) throw new Error("LOYALTY_CUSTOMER_NOT_FOUND_IN_ACTIVE_SCOPE");
+        const program = await tx.loyaltyProgram.findFirst({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true },
+        });
+        if (!program) throw new Error("LOYALTY_PROGRAM_INACTIVE");
+        const balanceResult = await tx.loyaltyLedgerEntry.aggregate({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, customerId: req.customerId },
+          _sum: { pointsDelta: true },
+        });
+        const pointsBalance = Number(balanceResult._sum.pointsDelta || 0);
+        if (pointsToRedeem > pointsBalance) throw new Error("LOYALTY_INSUFFICIENT_POINTS");
+        const redemptionValue = Math.round((pointsToRedeem * Number(program.currencyValuePerPoint) + Number.EPSILON) * 100) / 100;
+        if (!Number.isFinite(redemptionValue) || redemptionValue <= 0) throw new Error("LOYALTY_REDEMPTION_VALUE_INVALID");
+        const maxRedemption = Number(totals.grandTotal) * Number(program.maxRedemptionPct) / 100;
+        if (redemptionValue > maxRedemption + 0.005) throw new Error("LOYALTY_REDEMPTION_EXCEEDS_BASKET_LIMIT");
+        if (redemptionValue >= Number(totals.grandTotal) - 0.005) throw new Error("LOYALTY_REDEMPTION_CANNOT_ZERO_SALE");
+        effectiveDiscountTotal = Math.round((effectiveDiscountTotal + redemptionValue + Number.EPSILON) * 100) / 100;
+        totals = PricingTaxEngine.calculateSaleTotals(saleLineTotals, effectiveDiscountTotal, taxConfig);
+        if (Number(totals.grandTotal) <= 0) throw new Error("LOYALTY_REDEMPTION_CANNOT_ZERO_SALE");
+        loyaltyRedemption = { points: pointsToRedeem, value: redemptionValue, customerId: req.customerId, programId: program.id };
+      }
+
       if (Number(totals.grandTotal) <= 0) throw new Error("SALE_TOTAL_ZERO");
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
       const occurredAt = req.occurredAt ? new Date(req.occurredAt) : now;
@@ -304,6 +372,13 @@ export class PrismaAtomicCommercialFinanceService {
             soldAt: occurredAt.toISOString(),
             isBackdated,
             pricing: pricingEvidence,
+            retailPromotions: promotionEvidence,
+            loyaltyRedemption: loyaltyRedemption ? {
+              customerId: loyaltyRedemption.customerId,
+              points: loyaltyRedemption.points,
+              value: loyaltyRedemption.value,
+              programId: loyaltyRedemption.programId,
+            } : null,
             pricingPolicy: {
               precedence: ["CUSTOMER","PROMOTION","WHOLESALE","BULK","BRANCH","PRICE_LIST","BASE"],
               taxRatePct: taxConfig.ratePct,
@@ -312,6 +387,69 @@ export class PrismaAtomicCommercialFinanceService {
           },
         },
       });
+      if (loyaltyRedemption) {
+        await tx.loyaltyLedgerEntry.create({
+          data: {
+            id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+            customerId: loyaltyRedemption.customerId, entryType: "REDEEM",
+            pointsDelta: -loyaltyRedemption.points, monetaryValue: loyaltyRedemption.value,
+            referenceType: "SALE", referenceId: sale.id,
+            idempotencyKey: "sale:" + sale.id + ":loyalty-redeem",
+            reason: "Points redeemed atomically at POS checkout", createdById: ctx.userId,
+          },
+        });
+        await tx.auditEvent.create({
+          data: {
+            id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+            userId: ctx.userId, deviceId: req.deviceId, action: "RETAIL_LOYALTY_LEDGER_REDEEM",
+            entityType: "LoyaltyLedgerEntry", entityId: "sale:" + sale.id + ":loyalty-redeem",
+            metadata: { saleId: sale.id, customerId: loyaltyRedemption.customerId,
+              pointsDelta: -loyaltyRedemption.points, monetaryValue: loyaltyRedemption.value },
+          },
+        });
+      }
+
+      const activeLoyaltyProgram = req.customerId
+        ? await tx.loyaltyProgram.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } })
+        : null;
+      if (activeLoyaltyProgram && sale.customerId && Number(activeLoyaltyProgram.currencyUnitsPerPoint) > 0) {
+        const earnedPoints = Math.floor(Number(sale.grandTotal) / Number(activeLoyaltyProgram.currencyUnitsPerPoint));
+        if (earnedPoints > 0) {
+          await tx.loyaltyLedgerEntry.create({
+            data: {
+              id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+              customerId: sale.customerId, entryType: "EARN", pointsDelta: earnedPoints,
+              monetaryValue: Number(sale.grandTotal), referenceType: "SALE", referenceId: sale.id,
+              idempotencyKey: "sale:" + sale.id + ":loyalty-earn",
+              reason: "Points earned on paid sale", createdById: ctx.userId,
+            },
+          });
+          await tx.auditEvent.create({
+            data: {
+              id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+              userId: ctx.userId, deviceId: req.deviceId, action: "RETAIL_LOYALTY_LEDGER_EARN",
+              entityType: "LoyaltyLedgerEntry", entityId: "sale:" + sale.id + ":loyalty-earn",
+              metadata: { saleId: sale.id, customerId: sale.customerId, pointsDelta: earnedPoints,
+                monetaryValue: Number(sale.grandTotal) },
+            },
+          });
+        }
+      }
+
+      for (const appliedPromotion of promotionEvidence) {
+        await tx.auditEvent.create({
+          data: {
+            id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+            userId: ctx.userId, deviceId: req.deviceId, action: "RETAIL_PROMOTION_APPLIED",
+            entityType: "Sale", entityId: sale.id,
+            metadata: {
+              promotionId: appliedPromotion.id, name: appliedPromotion.name,
+              discountAmount: appliedPromotion.discountAmount,
+            },
+          },
+        });
+      }
+
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
       const drawerOperations: any[] = [];
       const salePayments = Array.isArray(sale.payments) ? sale.payments : payments;

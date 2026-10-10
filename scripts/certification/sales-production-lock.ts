@@ -7,9 +7,9 @@ const REQUIRED_SUBITEMS = ["Sales Dashboard","POS","New Sale","Cart","Product se
 
 const LOCKED_BLOBS: Record<string,string> = {
   "apps/web/src/pages/PosPage.tsx": "ec4bd7342a013ebe583e02360f3173a0ea2eaffd",
-  "apps/api/src/server.ts": "aef442415a28d84397ca5e34fc8988157c48da63",
-  "packages/contracts/src/index.ts": "27b80e50d9ee754721393adc6d858b1e71143cd2",
-  "packages/database/src/atomicCommercialFinance.ts": "61a73fb17fc50306939e68ca1443356534c5b1f0",
+  "apps/api/src/server.ts": "4ab36c152af57c49fb6753324e244b58e79a7ecc",
+  "packages/contracts/src/index.ts": "1d294e3287eebac73077bf4d727aad23b8595cb2",
+  "packages/database/src/atomicCommercialFinance.ts": "184a8db27d84ba900f7479618999001dd2a0417e",
   "packages/database/src/index.ts": "aa2cc24f2f5d9b6a9392efb179f40110f4693d5c",
   "packages/database/src/prismaProductionRepositories.ts": "b2cf81b306fca370b230e8554c60b33c920279eb",
   "packages/database/src/bundleInventory.ts": "86a69340f7bdaf36304805720ab5461a1d99a3ff",

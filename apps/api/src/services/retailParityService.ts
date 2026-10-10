@@ -30,7 +30,7 @@ export class RetailParityService {
       maxRedemptionPct: Number(saved.maxRedemptionPct),
     } : {
       tenantId: ctx.tenantId, branchId: ctx.branchId, currencyUnitsPerPoint: 1000,
-      currencyValuePerPoint: 1, maxRedemptionPct: 20, isActive: true, isDefault: true,
+      currencyValuePerPoint: 1, maxRedemptionPct: 20, isActive: false, isDefault: true,
     };
   }
 
@@ -81,7 +81,7 @@ export class RetailParityService {
 
   private async changePoints(ctx: TenantContext, input: {
     customerId: string; entryType: string; pointsDelta: number; monetaryValue?: number;
-    idempotencyKey: string; reason: string; referenceType?: string; referenceId?: string;
+    idempotencyKey: string; reason: string; referenceType?: string; referenceId?: string; allowNegativeBalance?: boolean;
   }) {
     const s = scope(ctx);
     if (!input.idempotencyKey.trim() || input.idempotencyKey.length > 200) throw new Error("LOYALTY_IDEMPOTENCY_KEY_INVALID");
@@ -111,7 +111,7 @@ export class RetailParityService {
         where: { ...s, customerId: input.customerId }, _sum: { pointsDelta: true },
       });
       const currentPoints = Number(balance._sum.pointsDelta || 0);
-      if (currentPoints + input.pointsDelta < 0) throw new Error("LOYALTY_INSUFFICIENT_POINTS");
+      if (currentPoints + input.pointsDelta < 0 && input.allowNegativeBalance !== true) throw new Error("LOYALTY_INSUFFICIENT_POINTS");
       const entry = await tx.loyaltyLedgerEntry.create({
         data: {
           id: randomUUID(), ...s, customerId: input.customerId, entryType: input.entryType,
@@ -140,24 +140,35 @@ export class RetailParityService {
     });
   }
 
-  async redeemLoyaltyPoints(ctx: TenantContext, input: {
-    customerId: string; points: number; basketAmount: number; idempotencyKey: string; reason?: string; referenceType?: string; referenceId?: string;
+  async quoteLoyaltyRedemption(ctx: TenantContext, input: {
+    customerId: string; points: number; basketAmount: number;
   }) {
+    const s = scope(ctx);
     const points = assertFinitePositive(input.points, "LOYALTY_REDEEM_POINTS_INVALID");
-    if (!Number.isInteger(points)) throw new Error("LOYALTY_REDEEM_POINTS_MUST_BE_INTEGER");
+    if (!Number.isSafeInteger(points)) throw new Error("LOYALTY_REDEEM_POINTS_MUST_BE_INTEGER");
     const basketAmount = Number(input.basketAmount);
     if (!Number.isFinite(basketAmount) || basketAmount <= 0) throw new Error("LOYALTY_BASKET_AMOUNT_INVALID");
-    const program = await this.getLoyaltyProgram(ctx);
-    if (!program.isActive) throw new Error("LOYALTY_PROGRAM_INACTIVE");
-    const redemptionValue = roundMoney(points * Number(program.currencyValuePerPoint));
-    if (redemptionValue > basketAmount * Number(program.maxRedemptionPct) / 100 + 0.0001) {
-      throw new Error("LOYALTY_REDEMPTION_EXCEEDS_BASKET_LIMIT");
-    }
-    return this.changePoints(ctx, {
-      customerId: input.customerId, entryType: "REDEEM", pointsDelta: -points, monetaryValue: redemptionValue,
-      idempotencyKey: input.idempotencyKey, reason: input.reason || "Points redeemed against qualifying basket",
-      referenceType: input.referenceType || "LOYALTY_REDEMPTION", referenceId: input.referenceId,
+    const customer = await prisma.customer.findFirst({
+      where: { id: input.customerId, ...s, status: "ACTIVE" }, select: { id: true },
     });
+    if (!customer) throw new Error("LOYALTY_CUSTOMER_NOT_FOUND_IN_ACTIVE_SCOPE");
+    const program = await prisma.loyaltyProgram.findFirst({ where: { ...s, isActive: true } });
+    if (!program) throw new Error("LOYALTY_PROGRAM_INACTIVE");
+    const balance = await prisma.loyaltyLedgerEntry.aggregate({
+      where: { ...s, customerId: input.customerId }, _sum: { pointsDelta: true },
+    });
+    const pointsBalance = Number(balance._sum.pointsDelta || 0);
+    if (points > pointsBalance) throw new Error("LOYALTY_INSUFFICIENT_POINTS");
+    const monetaryValue = roundMoney(points * Number(program.currencyValuePerPoint));
+    if (!Number.isFinite(monetaryValue) || monetaryValue <= 0) throw new Error("LOYALTY_REDEMPTION_VALUE_INVALID");
+    const maxRedemptionValue = roundMoney(basketAmount * Number(program.maxRedemptionPct) / 100);
+    if (monetaryValue > maxRedemptionValue + 0.005) throw new Error("LOYALTY_REDEMPTION_EXCEEDS_BASKET_LIMIT");
+    if (monetaryValue >= basketAmount - 0.005) throw new Error("LOYALTY_REDEMPTION_CANNOT_ZERO_SALE");
+    return {
+      customerId: input.customerId, points, pointsBalance, pointsRemaining: pointsBalance - points,
+      basketAmount: roundMoney(basketAmount), monetaryValue, maxRedemptionPct: Number(program.maxRedemptionPct),
+      programId: program.id, requiresCheckout: true,
+    };
   }
 
   async earnPointsForSale(ctx: TenantContext, saleId: string) {
@@ -198,7 +209,7 @@ export class RetailParityService {
     return this.changePoints(ctx, {
       customerId: ret.customerId, entryType: "RETURN_REVERSAL", pointsDelta: -remaining, monetaryValue: Number(ret.totalRefundAmount),
       idempotencyKey: "return:" + ret.id + ":loyalty-reversal", reason: "Reverse sale-earned points proportionally to completed returns",
-      referenceType: "SALE", referenceId: sale.id,
+      referenceType: "SALE", referenceId: sale.id, allowNegativeBalance: true,
     });
   }
 

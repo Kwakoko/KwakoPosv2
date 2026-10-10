@@ -883,7 +883,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/session/event" && req.method === "POST") {
-        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
         try {
           const ctx = verifyAccessToken(token);
           const event = String((req.body as any)?.event || "").toUpperCase();
@@ -912,7 +912,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/session" || routePath === "/auth/session/validate" || routePath === "/auth/session/heartbeat") {
-        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
         try {
           const ctx = verifyAccessToken(token);
           const sessionId = String(ctx.sessionId || "");
@@ -957,7 +957,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/sessions" && req.method === "GET") {
-        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
         try {
           const ctx = verifyAccessToken(token);
           const rows = await prisma.deviceSession.findMany({ where: { tenantId: ctx.tenantId, userId: ctx.sub }, orderBy: { lastActivityAt: "desc" }, select: { id: true, deviceId: true, branchId: true, createdAt: true, lastActivityAt: true, lastValidatedAt: true, expiresAt: true, refreshTokenExpiresAt: true, revokedAt: true, revokeReason: true, status: true, rememberMe: true, ipAddress: true, userAgent: true, platform: true } });
@@ -966,7 +966,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath.startsWith("/auth/sessions/") && routePath.endsWith("/revoke") && req.method === "POST") {
-        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
         const sessionId = routePath.split("/")[3];
         try {
           const ctx = verifyAccessToken(token);
@@ -979,7 +979,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/sessions/revoke-all" && req.method === "POST") {
-        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
         try {
           const ctx = verifyAccessToken(token);
           const count = await globalSessionManager.revokeAllUserSessions(ctx.tenantId, ctx.sub, "REVOKE_ALL");
@@ -988,7 +988,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/device/register" && req.method === "POST") {
-        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
         try {
           const ctx = verifyAccessToken(token);
           const now = new Date();
@@ -1004,7 +1004,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/devices" && req.method === "GET") {
-        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
         try {
           const ctx = verifyAccessToken(token);
           const devices = await prisma.device.findMany({ where: { tenantId: ctx.tenantId, userId: ctx.sub }, orderBy: { lastSeenAt: "desc" } });
@@ -1013,7 +1013,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath.startsWith("/auth/devices/") && routePath.endsWith("/revoke") && req.method === "POST") {
-        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
         const deviceId = routePath.split("/")[3];
         try {
           const ctx = verifyAccessToken(token);
@@ -1296,7 +1296,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
           if (authenticatedPath.startsWith("/admin/")) {
             requireAdminContext(req);
           }
-          if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
+          if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/") && !/^\/auth\/session(?:\/|$)/.test(authenticatedPath)) {
             if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(testUserId)) {
               globalLegalGovernanceService.forceAcceptanceForTest(testUserId, testTenantId);
             }
@@ -1346,7 +1346,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       if (authenticatedPath.startsWith("/admin/")) {
         requireAdminContext(req);
       }
-      if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
+      if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/") && !/^\/auth\/session(?:\/|$)/.test(authenticatedPath)) {
         if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(payload.sub)) {
           globalLegalGovernanceService.forceAcceptanceForTest(payload.sub, payload.tenantId);
         }
@@ -5062,19 +5062,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: await globalRetailParityService.adjustLoyaltyPoints(ctx, body) });
   });
 
-  server.post("/api/v1/retail/loyalty/redeem", async (req, reply) => {
-    const ctx = requireCommercialPermission(req, "loyalty.redeem", "loyalty.manage", "sales.create");
+  server.post("/api/v1/retail/loyalty/quote", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "loyalty.view", "loyalty.redeem", "loyalty.manage", "sales.create");
     const body = z.object({
       customerId: z.string().uuid(),
       points: z.number().int().positive(),
       basketAmount: z.number().finite().positive(),
-      idempotencyKey: z.string().trim().min(1).max(200),
-      reason: z.string().trim().min(3).max(500).optional(),
-      referenceType: z.string().trim().min(1).max(80).optional(),
-      referenceId: z.string().trim().min(1).max(200).optional(),
     }).strict().parse(req.body || {});
     const { globalRetailParityService } = await import("./services/retailParityService.js");
-    return reply.status(201).send({ success: true, data: await globalRetailParityService.redeemLoyaltyPoints(ctx, body) });
+    return reply.send({ success: true, data: await globalRetailParityService.quoteLoyaltyRedemption(ctx, body) });
   });
 
   server.get("/api/v1/retail/exchanges", async (req, reply) => {

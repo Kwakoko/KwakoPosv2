@@ -46,6 +46,7 @@ import {
   type IndustrySortOption,
 } from "../utils/mobileFormatters.js";
 import { apiFetch } from "../services/applicationApiService.js";
+import { isPlatformSuperAdminRole } from "../utils/platformRole.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
 import { ImpersonationModal } from "../components/ImpersonationModal.js";
 import { KeyboardShortcutsModal } from "../components/UI/KeyboardShortcutsModal.js";
@@ -906,9 +907,7 @@ export const Sidebar: React.FC<{
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const isSuperAdminUser = Boolean(
-    isSuperAdmin || String(user?.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"
-  );
+  const isSuperAdminUser = Boolean(isSuperAdmin || isPlatformSuperAdminRole(user?.role));
 
   // Auto-expand the section that contains the active tab
   useEffect(() => {
@@ -1890,9 +1889,7 @@ export const TopBar: React.FC<{
   const [showContext, setShowContext] = useState(false);
   const [unreadNotifCount, setUnreadNotifCount] = useState<number>(0);
 
-  const isSuperAdminUser = Boolean(
-    isSuperAdmin || Boolean(user?.role && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase()))
-  );
+  const isSuperAdminUser = Boolean(isSuperAdmin || isPlatformSuperAdminRole(user?.role));
 
   const closeAll = () => {
     setShowModule(false);
@@ -2376,9 +2373,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
   const { permissions, isSuperAdmin } = useRbac();
   const { isMobileSidebarOpen, setIsMobileSidebarOpen } = useModule();
 
-  const isSuperAdminUser = Boolean(
-    isSuperAdmin || Boolean(user?.role && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase()))
-  );
+  const isSuperAdminUser = Boolean(isSuperAdmin || isPlatformSuperAdminRole(user?.role));
 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
