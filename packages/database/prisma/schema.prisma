@@ -3438,6 +3438,7 @@ model SyncControlState {
 
   @@map("sync_control_state")
 
+}
 model StockTransfer {
   id                  String @id
   tenantId            String @map("tenant_id")
@@ -3620,6 +3621,4 @@ model DashboardReadModel {
   @@unique([tenantId, branchId, timeframe])
   @@index([tenantId, branchId, asOfRevision])
   @@map("dashboard_read_models")
-}
-
 }
