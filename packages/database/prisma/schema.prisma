@@ -3603,7 +3603,7 @@ model CustomerContact {
 }
 
 model DashboardReadModel {
-  id              String @id
+  id              String @id @default(uuid())
   tenantId        String
   branchId        String
   timeframe       String
@@ -3611,7 +3611,7 @@ model DashboardReadModel {
   snapshotVersion Int
   snapshot        Json
   capturedAt      DateTime @default(now()) @db.Timestamp(3)
-  updatedAt       DateTime @updatedAt @db.Timestamp(3)
+  updatedAt       DateTime @default(now()) @updatedAt @db.Timestamp(3)
   @@unique([tenantId, branchId, timeframe])
   @@index([tenantId, branchId, asOfRevision])
   @@map("dashboard_read_models")
