@@ -2887,6 +2887,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       })()}
                     </div>
                   </div>
+                </div>
+              )}
 
               {/* TAB 3: Inventory Summary */}
               {newVarAttrKey === "inventory" && (
