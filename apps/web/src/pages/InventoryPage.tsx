@@ -2800,68 +2800,93 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                             onClick={async () => {
                               const newBuy = Number(priceAuditNewBuy);
                               const newSell = Number(priceAuditNewSell);
-                              if (isNaN(newBuy) || newBuy < 0 || isNaN(newSell) || newSell < 0) {
-                                toast.warning("Invalid Input", "Please enter valid buying and selling prices.");
+                              const changeReason = priceAuditReason.trim();
+                              if (!Number.isFinite(newBuy) || newBuy < 0 || !Number.isFinite(newSell) || newSell < 0 || !changeReason) {
+                                toast.warning("Invalid Input", "Enter non-negative prices and a change reason.");
                                 return;
                               }
+                              if (!currentTenantId || !currentBranchId) {
+                                toast.error("Price Change Rejected", "Tenant and branch context are required.");
+                                return;
+                              }
+                              const now = new Date().toISOString();
+                              const productId = variantModalProduct.id;
+                              const existingHistory = Array.from(db.productPriceHistory.values()).filter((entry: any) =>
+                                entry.tenantId === currentTenantId && entry.branchId === currentBranchId &&
+                                entry.productId === productId && !entry.variantId
+                              );
+                              const versionNumber = existingHistory.reduce((highest: number, entry: any) =>
+                                Math.max(highest, Number(entry.versionNumber) || 0), 0) + 1;
+                              const historyId = safeUUID();
+                              const idempotencyKey = "PRICE-" + historyId;
                               const margin = newSell - newBuy;
-                              const marginPct = newSell > 0 ? Math.round((margin / newSell) * 10000) / 100 : 0;
-                              const updated = {
-                                ...variantModalProduct,
-                                buyingPrice: newBuy,
-                                costPrice: newBuy,
-                                sellingPrice: newSell,
-                                price: newSell,
+                              const marginPct = newSell > 0 ? (margin / newSell) * 100 : 0;
+                              const updated = { ...variantModalProduct, buyingPrice: newBuy, sellingPrice: newSell, updatedAt: now };
+                              const historyRecord: any = {
+                                id: historyId, tenantId: currentTenantId, branchId: currentBranchId, productId,
+                                variantId: null, versionNumber,
+                                previousBuyingPrice: Number(variantModalProduct.buyingPrice || 0), newBuyingPrice: newBuy,
+                                previousSellingPrice: Number(variantModalProduct.sellingPrice || 0), newSellingPrice: newSell,
+                                marginAmount: margin, marginPercentage: marginPct, changeType: "MANUAL_ADJUSTMENT",
+                                changeReason, effectiveFrom: now, changedByUserId: null, deviceId: "WEB-INVENTORY",
+                                idempotencyKey, createdAt: now,
                               };
-                              db.saveProductLocal(updated as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-                              setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updated : i));
+                              const writes: Array<{ store: any; key: string; value: unknown }> = existingHistory
+                                .filter((entry: any) => !entry.effectiveTo)
+                                .map((entry: any) => ({ store: "productPriceHistory", key: entry.id, value: { ...entry, effectiveTo: now } }));
+                              writes.push(
+                                { store: "productPriceHistory", key: historyId, value: historyRecord },
+                                { store: "products", key: productId, value: updated },
+                              );
+                              await commitLocalOutboxes(db, [{
+                                id: "price-change-" + historyId, entityType: "ProductPriceHistory", entityId: historyId,
+                                operationType: "CREATE",
+                                payload: { productId, newBuyingPrice: newBuy, newSellingPrice: newSell, changeType: "MANUAL_ADJUSTMENT", changeReason, effectiveFrom: now },
+                                idempotencyKey, tenantId: currentTenantId, branchId: currentBranchId,
+                              }], { tenantId: currentTenantId, branchId: currentBranchId }, writes);
+                              setItems((prev) => prev.map((item) => item.id === productId ? updated : item));
                               setVariantModalProduct(updated);
                               setPriceAuditOpen(false);
                               playSuccessChime();
-                              toast.success("Price Version Recorded", `New Margin: ${money(margin)} (${marginPct}%) · Reason: ${priceAuditReason}`);
+                              toast.success("Price Change Queued", "Version " + versionNumber + " was durably queued. New margin: " + money(margin) + " (" + marginPct.toFixed(2) + "%).");
                               publishDataChanged({ action: "INVENTORY_CHANGED" });
+                              await syncOutbox?.({ quiet: true }).catch(() => undefined);
                             }}
                           >
-                            <Check size={12} /> Commit Price Version
+                                                        <Check size={12} /> Commit Price Version
                           </button>
                         </div>
                       </div>
                     )}
                   </div>
 
-                  {/* Price History Timeline */}
+                  {/* Price History Timeline — persisted tenant/branch data only */}
                   <div className="v2-card v2-p-3">
                     <div className="v2-font-bold v2-text-xs v2-mb-2">Price & Margin History Ledger Timeline</div>
                     <div className="v2-space-y-3">
-                      <div className="v2-p-2" style={{ borderLeft: "3px solid var(--primary)", background: "var(--surface-1)" }}>
-                        <div className="v2-flex v2-items-center v2-justify-between">
-                          <span className="v2-font-bold v2-text-xs">Version #2 · 11 July 2026</span>
-                          <span className="badge v2-badge-success">PRICE_UPDATE</span>
-                        </div>
-                        <div className="v2-text-xs v2-text-muted v2-mt-1">Changed By: <strong>Admin User</strong> · Reason: <em>Supplier Price Increase</em></div>
-                        <div className="v2-grid v2-grid-3 v2-gap-2 v2-mt-2 v2-text-xs v2-mono">
-                          <div>Buying: 750 TZS &rarr; <strong>{money(variantModalProduct.buyingPrice)}</strong></div>
-                          <div>Selling: 1,100 TZS &rarr; <strong>{money(variantModalProduct.sellingPrice)}</strong></div>
-                          <div>Margin: <strong>{money(variantModalProduct.sellingPrice - variantModalProduct.buyingPrice)}</strong> ({variantModalProduct.sellingPrice > 0 ? Math.round(((variantModalProduct.sellingPrice - variantModalProduct.buyingPrice) / variantModalProduct.sellingPrice) * 100) : 0}%)</div>
-                        </div>
-                      </div>
-
-                      <div className="v2-p-2" style={{ borderLeft: "3px solid var(--muted)", background: "var(--surface-1)" }}>
-                        <div className="v2-flex v2-items-center v2-justify-between">
-                          <span className="v2-font-bold v2-text-xs">Version #1 · Initial Product Setup</span>
-                          <span className="badge v2-badge-muted">INITIAL_PRICE</span>
-                        </div>
-                        <div className="v2-text-xs v2-text-muted v2-mt-1">Changed By: <strong>System Console</strong> · Reason: <em>Initial Product Setup</em></div>
-                        <div className="v2-grid v2-grid-3 v2-gap-2 v2-mt-2 v2-text-xs v2-mono">
-                          <div>Buying: 0 &rarr; <strong>700 TZS</strong></div>
-                          <div>Selling: 0 &rarr; <strong>1,000 TZS</strong></div>
-                          <div>Margin: <strong>300 TZS</strong> (30%)</div>
-                        </div>
-                      </div>
+                      {(() => {
+                        const entries = Array.from(db.productPriceHistory.values())
+                          .filter((entry: any) => entry.tenantId === currentTenantId && entry.branchId === currentBranchId &&
+                            entry.productId === variantModalProduct.id && !entry.variantId)
+                          .sort((a: any, b: any) => Number(b.versionNumber) - Number(a.versionNumber));
+                        if (!entries.length) return <div className="v2-p-3 v2-text-xs v2-text-muted">No persisted price versions exist for this product yet.</div>;
+                        return entries.slice(0, 10).map((entry: any) => (
+                          <div key={entry.id} className="v2-p-2" style={{ borderLeft: "3px solid var(--primary)", background: "var(--surface-1)" }}>
+                            <div className="v2-flex v2-items-center v2-justify-between">
+                              <span className="v2-font-bold v2-text-xs">Version #{entry.versionNumber} · {new Date(entry.effectiveFrom).toLocaleString()}</span>
+                              <span className="badge v2-badge-muted">{entry.changeType}</span>
+                            </div>
+                            <div className="v2-text-xs v2-text-muted v2-mt-1">Reason: <em>{entry.changeReason}</em></div>
+                            <div className="v2-grid v2-grid-3 v2-gap-2 v2-mt-2 v2-text-xs v2-mono">
+                              <div>Buying: {money(Number(entry.previousBuyingPrice || 0))} → <strong>{money(Number(entry.newBuyingPrice || 0))}</strong></div>
+                              <div>Selling: {money(Number(entry.previousSellingPrice || 0))} → <strong>{money(Number(entry.newSellingPrice || 0))}</strong></div>
+                              <div>Margin: <strong>{money(Number(entry.marginAmount || 0))}</strong> ({Number(entry.marginPercentage || 0).toFixed(2)}%)</div>
+                            </div>
+                          </div>
+                        ));
+                      })()}
                     </div>
                   </div>
-                </div>
-              )}
 
               {/* TAB 3: Inventory Summary */}
               {newVarAttrKey === "inventory" && (
