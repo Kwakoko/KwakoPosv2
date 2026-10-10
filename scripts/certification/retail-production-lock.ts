@@ -51,6 +51,21 @@ async function main(): Promise<void> {
 
   const failures: string[] = [];
   const checked: Record<string, { expected: string; actual: string; pass: boolean }> = {};
+
+  // Protect the enforcement wiring without byte-pinning shared workflows.
+  const requiredHooks: Array<[string, string]> = [
+    ["package.json", '"certify:retail-lock": "tsx scripts/certification/retail-production-lock.ts"'],
+    [".github/workflows/ci.yml", "npm run certify:retail-lock"],
+    [".github/workflows/production-certification.yml", "npm run certify:retail-lock"],
+    [".github/workflows/production-release-exact-main.yml", "npm run certify:retail-lock"],
+  ];
+  for (const [relativePath, marker] of requiredHooks) {
+    try {
+      if (!read(relativePath).includes(marker)) failures.push("LOCK_HOOK_MISSING: " + relativePath + " marker " + marker);
+    } catch (error) {
+      failures.push("LOCK_HOOK_READ_FAILURE: " + relativePath + ": " + String(error));
+    }
+  }
   for (const [relativePath, expected] of Object.entries(LOCKED_BLOBS)) {
     try {
       const actual = blobSha(read(relativePath), relativePath);
