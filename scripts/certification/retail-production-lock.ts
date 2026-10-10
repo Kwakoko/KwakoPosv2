@@ -8,7 +8,7 @@ const LOCK_ID = "RETAIL-PRODUCTION-LOCK-2026-10-10";
 // These pins freeze the implementation that was certified. Intentional changes to
 // any locked retail surface require updating this manifest and rerunning the gate.
 const LOCKED_BLOBS: Record<string, string> = {
-  "apps/api/src/services/retailService.ts": "ff2e7c1fb7a708c8035a98ce4945e65f3ec0e012",
+  "apps/api/src/services/retailService.ts": "bc10724f4d20f575d4ad302e756e57d234fa1fde",
   "apps/api/src/services/retailAuthorization.ts": "6cfdb250467e19be381eafc69dd51befeafde178",
   "apps/api/src/server.ts": "7f12aa469897be1e93b4505d7cbb41e15e64be07",
   "packages/domain/src/retailEngine.ts": "9548845b617664c0b1693b2a3e8775dd3ee731f0",
