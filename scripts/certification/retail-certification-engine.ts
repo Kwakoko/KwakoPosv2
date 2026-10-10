@@ -91,11 +91,13 @@ export async function evaluateRetailCertification(): Promise<{
         basePrice: 1000, priceListPrice: 1050, branchPrice: 1100, bulkPrice: 950,
         wholesalePrice: 900, promotionalPrice: 850, customerPrice: 800, costPrice: 600, quantity: 10,
       }) === 800 && hasAll("packages/database/src/pricingAuthority.ts", "SALE_PRICE_AUTHORITY_VIOLATION") },
-    { id: 12, name: "Promotions & Discounts", description: "Promotion math and permission-gated API routes exist.", run: () =>
+    { id: 12, name: "Promotions & Discounts", description: "Percentage/fixed Retail promotions persist through PostgreSQL; unsupported types fail closed instead of being stored with incorrect semantics.", run: () =>
       engine.evaluatePricingAndTaxes(10000, 0, true, {
         id: "PROMO-TEST", tenantId: ctx.tenantId, branchId: ctx.branchId, name: "Test", type: "PERCENTAGE_DISCOUNT",
         discountValue: 10, startDate: new Date(), endDate: new Date(Date.now() + 86400000), isActive: true,
-      }).discountAmount === 1000 && hasAll("apps/api/src/server.ts", "/api/v1/pricing/promotions", "DISCOUNT_MANAGE") },
+      }).discountAmount === 1000 &&
+      hasAll("apps/api/src/services/retailService.ts", "prisma.pricingPromotion.create", "sourceModule: \"RETAIL\"", "RETAIL_PROMOTION_TYPE_UNSUPPORTED") &&
+      hasAll("apps/api/src/server.ts", "/api/v1/pricing/promotions", "DISCOUNT_MANAGE") },
     { id: 13, name: "Sales Returns & Refunds", description: "Duplicate variant lines cannot exceed sold quantity and persisted return limits are enforced.", run: () => {
       const sale: any = { saleNumber: "SALE-001", lines: [{ variantId: "v1", quantity: 2, unitPrice: 100, unitCost: 50, discountAmount: 0, taxAmount: 0, lineTotal: 200 }] };
       const valid = engine.validateSaleReturn(sale, [{ variantId: "v1", quantityReturned: 1, refundUnitPrice: 100 }], defaults);
@@ -143,8 +145,9 @@ export async function evaluateRetailCertification(): Promise<{
     { id: 20, name: "Retail Security & RBAC", description: "Retail actions require explicit capabilities at API boundary, with negative-path tests.", run: () =>
       hasAll("apps/api/src/server.ts", "assertRetailCapabilityForContext", "RETAIL_AI_INSIGHTS_VIEW", "RETAIL_REPLENISHMENT_EXECUTE") &&
       hasAll("tests/unit/retail-authorization.test.ts", "retail AI insights", "FORBIDDEN") },
-    { id: 21, name: "Auditability", description: "Retail service and commercial transactions record auditable actions.", run: () =>
-      hasAll("apps/api/src/services/retailService.ts", "recordAuditEvent", "POS_SALE_CHECKOUT") &&
+    { id: 21, name: "Auditability", description: "Retail audit events persist in PostgreSQL and commercial sale transactions write audit records within the authoritative transaction.", run: () =>
+      hasAll("apps/api/src/services/retailService.ts", "async recordAuditEvent", "prisma.auditEvent.create", "async getAuditEvents", "metadata: { module: \"RETAIL\"") &&
+      !readSource("apps/api/src/services/retailService.ts").includes("auditEventsMap") &&
       hasAll("packages/database/src/atomicCommercialFinance.ts", "tx.auditEvent.create", "SALE_CREATED") },
     { id: 22, name: "Data Integrity & Hard Invariants", description: "Orphan variants and duplicate SKUs are rejected by executable invariant checks.", run: () => {
       let orphan = false, duplicate = false;
