@@ -3,6 +3,7 @@ import { Layers, Plus, Save, Trash2 } from "lucide-react";
 import { useBranch, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { useToast } from "../context/ToastContext.js";
 import { getBundleAvailableQuantity } from "../services/inventoryStockService.js";
+import { commitLocalOutbox } from "../persistence/commitLocalMutation.js";
 
 type ComponentLine = { variantId: string; quantity: number };
 
@@ -28,54 +29,53 @@ export const InventoryBundleWorkspace: React.FC = () => {
   };
   const save = async () => {
     if (!currentTenantId || !currentBranchId || !selected || !hasPermission("inventory.adjust")) {
-      toast.error("Bundle Save Rejected","Inventory permission and a valid bundle variant are required."); return;
+      toast.error("Bundle Save Rejected", "Inventory permission and a valid bundle variant are required."); return;
     }
-    if (!lines.length) { toast.error("Bundle Save Rejected","Add at least one component."); return; }
-    const normalized = lines.map((line) => ({ variantId: String(line.variantId), quantity: Number(line.quantity) }));
+    if (!lines.length) { toast.error("Bundle Save Rejected", "Add at least one component."); return; }
+    const normalized = lines.map((line) => ({ componentVariantId: String(line.variantId), quantity: Number(line.quantity) }));
     const seen = new Set<string>();
     for (const line of normalized) {
-      if (!line.variantId || !Number.isFinite(line.quantity) || line.quantity <= 0) {
-        toast.error("Bundle Save Rejected","Every component must have a positive quantity."); return;
-      }
-      if (line.variantId === selected.id || seen.has(line.variantId)) {
-        toast.error("Bundle Save Rejected","Bundle components must be unique and cannot reference the bundle itself."); return;
-      }
-      const component = variants.find((v:any) => v.id === line.variantId);
-      if (!component || component.tenantId !== currentTenantId || component.branchId !== currentBranchId || component.isActive === false) {
-        toast.error("Bundle Save Rejected","Every component must belong to the current tenant and branch."); return;
+      const component = variants.find((v: any) => v.id === line.componentVariantId);
+      if (!component || component.tenantId !== currentTenantId || component.branchId !== currentBranchId ||
+          component.isActive === false || component.id === selected.id || !Number.isFinite(line.quantity) ||
+          line.quantity <= 0 || seen.has(component.id)) {
+        toast.error("Bundle Save Rejected", "Components must be unique active variants in the current tenant and branch, with positive quantities."); return;
       }
       if (component.attributes?.__bundle === true || Array.isArray(component.attributes?.bundleComponents)) {
-        toast.error("Bundle Save Rejected","Nested bundles/kits are not supported."); return;
+        toast.error("Bundle Save Rejected", "Nested bundles and kits are not supported."); return;
       }
-      seen.add(line.variantId);
+      seen.add(component.id);
     }
     const now = new Date().toISOString();
-    const bundleDefinitionVersion = `BUNDLE-${selected.id}-${now}`;
-    const attributes = { ...(selected.attributes || {}), __bundle: true, bundleDefinitionVersion, bundleComponents: normalized };
-    const updated = { ...selected, attributes, updatedAt: now };
-    const operationId = `bundle-update-${selected.id}-${Date.now()}`;
-    const idempotencyKey = `BUNDLE-${selected.id}-${Date.now()}`;
-    await db.executeAtomicMutation({
-      writes: [{ store: "productVariants", key: selected.id, value: updated }],
-      outboxItem: {
-        id: operationId, entityType: "ProductVariant", entityId: selected.id, operationType: "UPDATE",
-        payload: { attributes, _baseUpdatedAt: selected.updatedAt }, clientCreatedAt: now, idempotencyKey, status: "PENDING",
-        tenantId: currentTenantId, branchId: currentBranchId
-      },
-      tenantContext: { tenantId: currentTenantId, branchId: currentBranchId }
+    const currentBundles = db.getConfigurationLocal("inventory:ops:ProductBundle", { tenantId: currentTenantId, branchId: currentBranchId });
+    const previous = Array.isArray(currentBundles) ? currentBundles : [];
+    const exists = previous.some((bundle: any) => bundle.id === selected.id);
+    const idempotencyKey = "BUNDLE-" + selected.id + "-" + Date.now();
+    await commitLocalOutbox(db, {
+      entityType: "ProductBundle", entityId: selected.id, operationType: exists ? "UPDATE" : "CREATE",
+      payload: { productId: selected.productId, name: selected.name, status: "ACTIVE", effectiveFrom: now, notes: "Retail product bundle / kit", items: normalized },
+      idempotencyKey, tenantId: currentTenantId, branchId: currentBranchId,
     });
-    await syncOutbox?.({quiet:true}).catch(()=>{});
-    toast.success("Bundle Saved","Bundle definition is now part of the authoritative ProductVariant and syncs through the normal ProductVariant path.");
+    const next = [...previous.filter((bundle: any) => bundle.id !== selected.id),
+      { id: selected.id, productId: selected.productId, name: selected.name, items: normalized, updatedAt: now }];
+    db.saveConfigurationLocal("inventory:ops:ProductBundle", next, { tenantId: currentTenantId, branchId: currentBranchId });
+    await syncOutbox?.({ quiet: true }).catch(() => undefined);
+    toast.success("Bundle Save Queued", "The bundle definition is queued as an authoritative ProductBundle record.");
   };
   const clear = async () => {
     if (!selected || !currentTenantId || !currentBranchId || !hasPermission("inventory.adjust")) return;
-    const now = new Date().toISOString();
-    const attributes = { ...(selected.attributes || {}) };
-    delete attributes.__bundle; delete attributes.bundleComponents;
-    const operationId = `bundle-clear-${selected.id}-${Date.now()}`;
-    const idempotencyKey = `BUNDLE-CLEAR-${selected.id}-${Date.now()}`;
-    await db.executeAtomicMutation({ writes:[{store:"productVariants",key:selected.id,value:{...selected,attributes,updatedAt:now}}], outboxItem:{id:operationId,entityType:"ProductVariant",entityId:selected.id,operationType:"UPDATE",payload:{attributes,_baseUpdatedAt:selected.updatedAt},clientCreatedAt:now,idempotencyKey,status:"PENDING",tenantId:currentTenantId,branchId:currentBranchId},tenantContext:{tenantId:currentTenantId,branchId:currentBranchId}});
-    setLines([]); toast.success("Bundle Cleared","Bundle definition removed from the variant.");
+    const idempotencyKey = "BUNDLE-CLEAR-" + selected.id + "-" + Date.now();
+    await commitLocalOutbox(db, {
+      entityType: "ProductBundle", entityId: selected.id, operationType: "DELETE",
+      payload: { productId: selected.productId, reason: "Bundle cleared by authorized user" },
+      idempotencyKey, tenantId: currentTenantId, branchId: currentBranchId,
+    });
+    const current = db.getConfigurationLocal("inventory:ops:ProductBundle", { tenantId: currentTenantId, branchId: currentBranchId });
+    db.saveConfigurationLocal("inventory:ops:ProductBundle", Array.isArray(current) ? current.filter((bundle: any) => bundle.id !== selected.id) : [],
+      { tenantId: currentTenantId, branchId: currentBranchId });
+    setLines([]);
+    await syncOutbox?.({ quiet: true }).catch(() => undefined);
+    toast.success("Bundle Removal Queued", "The bundle will be marked inactive by the authoritative sync transaction.");
   };
 
   return <div className="v2-space-y-4">
