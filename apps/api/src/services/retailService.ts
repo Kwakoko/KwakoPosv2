@@ -1,9 +1,6 @@
 import { randomUUID } from "crypto";
 import type {
   TenantContext,
-  Product,
-  ProductVariant,
-  Sale,
   RetailModuleManifest,
   RetailSettings,
   RetailPromotion,
@@ -15,39 +12,14 @@ import {
   globalRetailEngine,
   RetailEngine,
 } from "@kwakopos2/domain";
-import {
-  ScopedProductRepository,
-  ScopedStockRepository,
-  ScopedCommercialRepository,
-  globalInMemoryStore,
-  InMemoryStore,
-  prisma,
-} from "@kwakopos2/database";
-import { globalProductService, ProductService } from "./productService.js";
+import { prisma } from "@kwakopos2/database";
 import { globalSettingsService } from "./settingsService.js";
 
 export class RetailService {
   private engine?: RetailEngine;
-  private store: InMemoryStore;
-  private productService: ProductService;
-  private productRepo: ScopedProductRepository;
-  private stockRepo: ScopedStockRepository;
-  private commercialRepo: ScopedCommercialRepository;
 
-  private promotionsMap: Map<string, RetailPromotion> = new Map();
-  private auditEventsMap: Map<string, RetailAuditEvent[]> = new Map();
-
-  constructor(
-    engine?: RetailEngine,
-    store?: InMemoryStore,
-    productService?: ProductService
-  ) {
+  constructor(engine?: RetailEngine) {
     this.engine = engine;
-    this.store = store || globalInMemoryStore;
-    this.productService = productService || globalProductService;
-    this.productRepo = new ScopedProductRepository(this.store);
-    this.stockRepo = new ScopedStockRepository(this.store);
-    this.commercialRepo = new ScopedCommercialRepository(this.store);
   }
 
   private getEngine(): RetailEngine {
@@ -108,70 +80,99 @@ export class RetailService {
     return updated;
   }
 
-  createPromotion(ctx: TenantContext, promo: Omit<RetailPromotion, "id" | "tenantId">): RetailPromotion {
-    const id = `PROMO-${randomUUID().slice(0, 8)}`;
-    const fullPromo: RetailPromotion = {
-      ...promo,
-      id,
-      tenantId: ctx.tenantId,
-      branchId: promo.branchId || ctx.branchId,
+  private toRetailPromotion(row: any): RetailPromotion {
+    return {
+      id: String(row.id),
+      tenantId: String(row.tenantId),
+      branchId: row.branchId ? String(row.branchId) : undefined,
+      name: String(row.name),
+      type: row.kind === "PERCENTAGE" ? "PERCENTAGE_DISCOUNT" : "FIXED_AMOUNT_DISCOUNT",
+      discountValue: Number(row.value),
+      minOrderAmount: row.minOrderAmount == null ? undefined : Number(row.minOrderAmount),
+      startDate: new Date(row.startAt),
+      endDate: new Date(row.endAt),
+      isActive: Boolean(row.isActive),
+      requiredRoleToApply: row.requiredPermission ? String(row.requiredPermission) : undefined,
     };
-    this.promotionsMap.set(id, fullPromo);
-    this.recordAuditEvent(ctx, "PROMOTION_CREATE", "RetailPromotion", id, undefined, fullPromo, `Created promotion ${promo.name}`);
-    return fullPromo;
   }
 
-  getPromotions(ctx: TenantContext): RetailPromotion[] {
-    return Array.from(this.promotionsMap.values()).filter(
-      (p) => p.tenantId === ctx.tenantId && (p.branchId === ctx.branchId || !p.branchId) && p.isActive
-    );
-  }
-
-  async processPOSCheckout(
+  async createPromotion(
     ctx: TenantContext,
-    items: Array<{
-      productId: string;
-      variantId: string;
-      quantity: number;
-      unitPrice: number;
-      unitCost: number;
-      discountAmount?: number;
-    }>,
-    payments: Array<{ amount: number; paymentMethod: "CASH" | "CARD" | "MOBILE_MONEY" | "CREDIT" }>,
-    cartDiscountPct: number = 0,
-    customerId?: string
-  ): Promise<Sale> {
-    const settings = await this.getSettings(ctx);
-    const totals = this.getEngine().calculatePOSCartTotals(
-      items,
-      cartDiscountPct,
-      settings.taxRatePct,
-      settings.taxInclusivePricing
-    );
+    promo: Omit<RetailPromotion, "id" | "tenantId">
+  ): Promise<RetailPromotion> {
+    const kind = promo.type === "PERCENTAGE_DISCOUNT"
+      ? "PERCENTAGE"
+      : promo.type === "FIXED_AMOUNT_DISCOUNT" ? "FIXED" : null;
+    if (!kind) {
+      // Never store unsupported promotion types as if their checkout semantics were implemented.
+      throw new Error("RETAIL_PROMOTION_TYPE_UNSUPPORTED:" + promo.type);
+    }
+    if (promo.branchId && promo.branchId !== ctx.branchId) {
+      throw new Error("RETAIL_PROMOTION_BRANCH_BOUNDARY_VIOLATION");
+    }
+    const value = Number(promo.discountValue);
+    if (!Number.isFinite(value) || value < 0 || (kind === "PERCENTAGE" && value > 100)) {
+      throw new Error("RETAIL_PROMOTION_VALUE_INVALID");
+    }
+    const startAt = new Date(promo.startDate);
+    const endAt = new Date(promo.endDate);
+    if (!Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || endAt <= startAt) {
+      throw new Error("RETAIL_PROMOTION_DATE_RANGE_INVALID");
+    }
 
-    const { sale } = this.commercialRepo.createPosSale(ctx, {
-      customerId,
-      items: items.map((i) => ({
-        productId: i.productId,
-        variantId: i.variantId,
-        quantity: i.quantity,
-        unitPrice: i.unitPrice,
-        unitCost: i.unitCost,
-        discountAmount: i.discountAmount || 0,
-      })),
-      discountTotal: totals.discountTotal,
-      taxTotal: totals.taxTotal,
-      payments: payments.map((p) => ({
-        amount: p.amount,
-        paymentMethod: p.paymentMethod,
-      })),
-      deviceId: "POS-TERMINAL-01",
-      operationId: randomUUID(),
-      idempotencyKey: `POS-SALE-${randomUUID()}`,
+    return prisma.$transaction(async (tx: any) => {
+      const created = await tx.pricingPromotion.create({
+        data: {
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          variantId: null,
+          name: String(promo.name).trim(),
+          kind,
+          value,
+          minQuantity: null,
+          minOrderAmount: promo.minOrderAmount ?? null,
+          startAt,
+          endAt,
+          isActive: promo.isActive !== false,
+          priority: 0,
+          stackable: false,
+          requiredPermission: promo.requiredRoleToApply || "DISCOUNT_MANAGE",
+          createdById: ctx.userId,
+          sourceModule: "RETAIL",
+        },
+      });
+      const event = this.getEngine().createAuditEvent(
+        ctx, "RETAIL_PROMOTION_CREATED", "RetailPromotion", created.id,
+        undefined, { ...promo, id: created.id, tenantId: ctx.tenantId }, "Created promotion " + promo.name
+      );
+      await tx.auditEvent.create({
+        data: {
+          id: event.eventId,
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          userId: ctx.userId,
+          deviceId: event.deviceId,
+          action: event.action,
+          entityType: event.entityType,
+          entityId: event.entityId,
+          metadata: { module: "RETAIL", beforeState: null, afterState: event.afterState, reason: event.reason, timestamp: event.timestamp },
+        },
+      });
+      return this.toRetailPromotion(created);
     });
+  }
 
-    this.recordAuditEvent(ctx, "POS_SALE_CHECKOUT", "Sale", sale.id, undefined, sale, `Completed sale #${sale.saleNumber}`);
-    return sale;
+  async getPromotions(ctx: TenantContext): Promise<RetailPromotion[]> {
+    const rows = await prisma.pricingPromotion.findMany({
+      where: {
+        tenantId: ctx.tenantId,
+        sourceModule: "RETAIL",
+        OR: [{ branchId: null }, { branchId: ctx.branchId }],
+      },
+      orderBy: [{ isActive: "desc" }, { priority: "desc" }, { startAt: "desc" }],
+    });
+    return rows.map((row: any) => this.toRetailPromotion(row));
   }
 
   private async getAuthoritativeRetailSignals(ctx: TenantContext) {
@@ -227,7 +228,7 @@ export class RetailService {
     return this.getEngine().generateExplainableAiRecommendations(ctx, inventory, salesHistory);
   }
 
-  recordAuditEvent(
+  async recordAuditEvent(
     ctx: TenantContext,
     action: string,
     entityType: string,
@@ -235,18 +236,55 @@ export class RetailService {
     beforeState?: Record<string, any>,
     afterState?: Record<string, any>,
     reason?: string
-  ): RetailAuditEvent {
+  ): Promise<RetailAuditEvent> {
     const event = this.getEngine().createAuditEvent(ctx, action, entityType, entityId, beforeState, afterState, reason);
-    const key = ctx.tenantId;
-    if (!this.auditEventsMap.has(key)) {
-      this.auditEventsMap.set(key, []);
-    }
-    this.auditEventsMap.get(key)!.push(event);
+    await prisma.auditEvent.create({
+      data: {
+        id: event.eventId,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        userId: ctx.userId,
+        deviceId: event.deviceId,
+        action: event.action,
+        entityType: event.entityType,
+        entityId: event.entityId,
+        metadata: { module: "RETAIL", beforeState: event.beforeState ?? null, afterState: event.afterState ?? null, reason: event.reason ?? null, timestamp: event.timestamp },
+      },
+    });
     return event;
   }
 
-  getAuditEvents(ctx: TenantContext): RetailAuditEvent[] {
-    return this.auditEventsMap.get(ctx.tenantId) || [];
+  async getAuditEvents(ctx: TenantContext): Promise<RetailAuditEvent[]> {
+    const rows = await prisma.auditEvent.findMany({
+      where: {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        OR: [
+          { entityType: { startsWith: "Retail" } },
+          { action: { startsWith: "RETAIL_" } },
+          { action: "POS_SALE_CHECKOUT" },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    });
+    return rows.map((row: any) => {
+      const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata as Record<string, any> : {};
+      return {
+        eventId: String(row.id),
+        tenantId: String(row.tenantId),
+        branchId: String(row.branchId),
+        userId: String(row.userId),
+        deviceId: String(row.deviceId),
+        action: String(row.action),
+        entityType: String(row.entityType),
+        entityId: String(row.entityId),
+        beforeState: metadata.beforeState ?? undefined,
+        afterState: metadata.afterState ?? undefined,
+        reason: metadata.reason ?? undefined,
+        timestamp: String(metadata.timestamp || row.createdAt.toISOString()),
+      };
+    });
   }
 }
 
