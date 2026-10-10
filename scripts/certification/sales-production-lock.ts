@@ -17,7 +17,7 @@ const LOCKED_BLOBS: Record<string,string> = {
   "apps/web/src/indexedDb.ts": "1893f5704481b7a7178e80622b99a8c4ae42376c",
   "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae",
   "apps/web/src/services/inventoryStockService.ts": "5fadbef7dc8de26e7bc93ce95547cf7a9c8f7e3b",
-  "apps/web/src/components/InventoryBundleWorkspace.tsx": "6f95a91ee619d9ab00c7cc623dfc00a486c72a54",
+  "apps/web/src/components/InventoryBundleWorkspace.tsx": "04660995ea7984acfc47af879fcb8a3c58b67563",
   "tests/unit/bundle-production-closure.test.ts": "ee008c74dab2d6bf6cfc423ef350b706e7b8b08d"
 };
 
