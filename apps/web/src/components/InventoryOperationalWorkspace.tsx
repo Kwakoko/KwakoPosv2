@@ -5,7 +5,7 @@ import { useToast } from "../context/ToastContext.js";
 import { safeUUID } from "../services/applicationApiService.js";
 import { queueStockAdjustment, buildStockBalanceProjection } from "../services/inventoryStockService.js";
 import { getOrCreatePersistentDeviceId } from "../services/deviceIdentity.js";
-import { commitLocalOutbox } from "../persistence/commitLocalMutation.js";
+import { commitLocalOutbox, commitLocalOutboxes } from "../persistence/commitLocalMutation.js";
 
 type Props = { mode: "transfers" | "count" | "wastage" | "alerts" | "sync" | "drilldown" };
 
@@ -67,65 +67,83 @@ export const InventoryOperationalWorkspace: React.FC<Props> = ({ mode }) => {
   const doTransferRelease = async () => {
     ensureContext();
     if (!hasPermission("inventory.transfer")) throw new Error("INVENTORY_TRANSFER_PERMISSION_REQUIRED");
-    const v = variants.find((x:any) => x.id === variantId);
-    if (!v || !destinationBranchId || destinationBranchId === currentBranchId || qty <= 0) throw new Error("TRANSFER_FIELDS_INVALID");
-    const id = transferId.trim() || `TR-${safeUUID().slice(0,8).toUpperCase()}`;
-    await recordLedgerMovement(v, -qty, "TRANSFER_OUT", "StockTransfer", id, `Transfer to branch ${destinationBranchId}`);
+    const v = variants.find((x: any) => x.id === variantId);
+    if (!v || !destinationBranchId || destinationBranchId === currentBranchId || !Number.isFinite(qty) || qty <= 0) throw new Error("TRANSFER_FIELDS_INVALID");
+    const id = transferId.trim() || safeUUID();
     await commitLocalOutbox(db, {
-      entityType: "Setting", entityId: `inventory-transfer-${id}`, operationType: "CREATE",
-      payload: { key: `inventory-transfer-${id}`, transferId: id, productId: v.productId, variantId: v.id, sku: v.sku, quantity: qty, sourceBranchId: currentBranchId, destinationBranchId, status: "RELEASED" },
-      idempotencyKey: `TRANSFER-DOC-${id}`, tenantId: currentTenantId!, branchId: currentBranchId!
+      entityType: "StockTransfer", entityId: id, operationType: "CREATE",
+      payload: {
+        transferNumber: id.startsWith("TR-") ? id : "TR-" + id.slice(0, 8).toUpperCase(),
+        sourceBranchId: currentBranchId, destinationBranchId, status: "SUBMITTED",
+        items: [{ id: safeUUID(), productId: v.productId, variantId: v.id, quantity: qty, unitCost: Number(v.costPrice || 0) }],
+      },
+      idempotencyKey: "TRANSFER-CREATE-" + id, tenantId: currentTenantId!, branchId: currentBranchId!,
     });
-    setTransferId(id); toast.success("Transfer Released", `${qty} × ${v.sku} released under ${id}. Destination must receive using the same transfer ID.`);
+    setTransferId(id);
+    toast.success("Transfer Queued", "Transfer " + id + " is queued. The authoritative sync transaction will deduct source stock.");
   };
 
   const doTransferReceive = async () => {
     ensureContext();
     if (!hasPermission("inventory.transfer")) throw new Error("INVENTORY_TRANSFER_PERMISSION_REQUIRED");
-    const v = variants.find((x:any) => x.id === variantId);
+    if (!currentTenantId || !currentBranchId) throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED");
     const id = transferId.trim();
-    if (!v || !id || qty <= 0) throw new Error("RECEIVE_FIELDS_INVALID");
-    await recordLedgerMovement(v, qty, "TRANSFER_IN", "StockTransfer", id, `Transfer received from source branch`);
-    toast.success("Transfer Received", `${qty} × ${v.sku} received under ${id}.`);
+    if (!id) throw new Error("TRANSFER_ID_REQUIRED");
+    await commitLocalOutbox(db, {
+      entityType: "StockTransfer", entityId: id, operationType: "UPDATE",
+      payload: { status: "RECEIVED" }, idempotencyKey: "TRANSFER-RECEIVE-" + id + "-" + currentBranchId,
+      tenantId: currentTenantId, branchId: currentBranchId,
+    });
+    toast.success("Transfer Receipt Queued", "Receipt for " + id + " is queued under the selected destination branch.");
   };
 
   const postCount = async () => {
     ensureContext();
     if (!hasPermission("inventory.adjust")) throw new Error("INVENTORY_ADJUST_PERMISSION_REQUIRED");
-    setBusy(true);
-    try {
-      let posted = 0;
-      for (const v of rows) {
-        const raw = countValues[v.id];
-        if (raw === undefined || raw.trim() === "") continue;
-        const target = Number(raw);
-        if (!Number.isFinite(target) || target < 0) throw new Error(`INVALID_COUNT:${v.sku}`);
-        const before = Number(projection.byVariant.get(v.id) || 0);
-        if (target === before) continue;
-        await queueStockAdjustment(db, {
-          tenantId: currentTenantId!, branchId: currentBranchId!, productId: v.productId, variantId: v.id, sku: v.sku,
-          productName: v.name, adjustmentType: "SET", quantity: target, unitCost: Number(v.costPrice || 0),
-          reason: "Physical stock count reconciliation", notes: "Inventory Stock Count", userId: undefined,
-          deviceId: await getOrCreatePersistentDeviceId()
-        });
-        posted++;
-      }
-      toast.success("Stock Count Posted", `${posted} variance adjustments committed to StockLedger and queued for sync.`);
-      setCountValues({});
-    } finally { setBusy(false); }
+    if (!currentTenantId || !currentBranchId) throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED");
+    const countedRows = rows.filter((v: any) => countValues[v.id] !== undefined && countValues[v.id].trim() !== "");
+    if (!countedRows.length) throw new Error("STOCK_COUNT_VALUES_REQUIRED");
+    const lines = countedRows.map((v: any) => {
+      const counted = Number(countValues[v.id]);
+      if (!Number.isFinite(counted) || counted < 0) throw new Error("INVALID_COUNT:" + v.sku);
+      const systemQuantity = Number(projection.byVariant.get(v.id) || 0);
+      return {
+        id: safeUUID(), productId: v.productId, variantId: v.id, sku: v.sku, productName: v.name,
+        systemQuantity, countedQuantity: counted, varianceQuantity: counted - systemQuantity,
+        varianceValue: (counted - systemQuantity) * Number(v.costPrice || 0), unitCost: Number(v.costPrice || 0),
+      };
+    });
+    const countId = safeUUID();
+    const now = new Date().toISOString();
+    await commitLocalOutboxes(db, [
+      {
+        entityType: "StockCount", entityId: countId, operationType: "CREATE",
+        payload: { sessionNumber: "COUNT-" + countId.slice(0, 8).toUpperCase(), name: "Physical Stock Count", scope: "FULL_STORE", status: "COUNTING", startedAt: now, lines },
+        idempotencyKey: "STOCK-COUNT-CREATE-" + countId, tenantId: currentTenantId, branchId: currentBranchId,
+      },
+      {
+        entityType: "StockCount", entityId: countId, operationType: "UPDATE",
+        payload: { status: "POSTED", lines: lines.map((line) => ({ id: line.id, countedQuantity: line.countedQuantity })) },
+        idempotencyKey: "STOCK-COUNT-POST-" + countId, tenantId: currentTenantId, branchId: currentBranchId,
+      },
+    ], { tenantId: currentTenantId, branchId: currentBranchId });
+    toast.success("Stock Count Queued", "Physical count " + countId + " is queued; only ledger-backed variances will be posted.");
+    setCountValues({});
   };
 
   const postWastage = async (movement: "DAMAGE" | "EXPIRY") => {
     ensureContext();
     if (!hasPermission("inventory.adjust")) throw new Error("INVENTORY_ADJUST_PERMISSION_REQUIRED");
-    const v = variants.find((x:any) => x.id === variantId);
-    if (!v || qty <= 0) throw new Error("WASTAGE_FIELDS_INVALID");
-    await queueStockAdjustment(db, {
-      tenantId: currentTenantId!, branchId: currentBranchId!, productId: v.productId, variantId: v.id, sku: v.sku, productName: v.name,
-      adjustmentType: "DECREASE", quantity: qty, unitCost: Number(v.costPrice || 0), reason: reason.trim() || movement,
-      notes: "Inventory Wastage & Spillage", movementType: movement, deviceId: await getOrCreatePersistentDeviceId()
+    if (!currentTenantId || !currentBranchId) throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED");
+    const v = variants.find((x: any) => x.id === variantId);
+    if (!v || !Number.isFinite(qty) || qty <= 0) throw new Error("WASTAGE_FIELDS_INVALID");
+    const id = safeUUID();
+    await commitLocalOutbox(db, {
+      entityType: "WastageRecord", entityId: id, operationType: "CREATE",
+      payload: { productId: v.productId, variantId: v.id, quantity: qty, reason: reason.trim() || movement, notes: "Inventory Wastage & Spillage", occurredAt: new Date().toISOString() },
+      idempotencyKey: "WASTAGE-" + id, tenantId: currentTenantId, branchId: currentBranchId,
     });
-    toast.success("Wastage Posted", `${qty} × ${v.sku} recorded as ${movement} in the authoritative ledger.`);
+    toast.success("Wastage Queued", "Wastage " + id + " will be recorded with stock and audit changes in one server transaction.");
   };
 
   const action = async (fn:()=>Promise<void>) => { setBusy(true); try { await fn(); await syncOutbox?.({quiet:true}).catch(()=>{}); } catch(e:any) { toast.error("Inventory Operation Rejected", String(e?.message || e)); } finally { setBusy(false); } };
