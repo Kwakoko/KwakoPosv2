@@ -21,6 +21,7 @@ import {
   ScopedCommercialRepository,
   globalInMemoryStore,
   InMemoryStore,
+  prisma,
 } from "@kwakopos2/database";
 import { globalProductService, ProductService } from "./productService.js";
 import { globalSettingsService } from "./settingsService.js";
@@ -65,26 +66,46 @@ export class RetailService {
     const tax: any = settings["tax.config"] || {};
     const pos: any = settings["pos.config"] || {};
     const inventory: any = settings["inventory.config"] || {};
+    const retail: any = settings["retail.config"] || {};
+    const defaults = this.getEngine().getDefaultSettings(ctx.tenantId, ctx.branchId);
     return {
-      ...this.getEngine().getDefaultSettings(ctx.tenantId, ctx.branchId),
+      ...defaults,
       tenantId: ctx.tenantId,
       branchId: ctx.branchId,
-      currency: String(tax.currencyCode || "TZS"),
-      taxRatePct: Number(tax.vatRatePercent ?? 0),
+      currency: String(retail.currency ?? tax.currencyCode ?? defaults.currency),
+      taxRatePct: Number(tax.vatEnabled ? (tax.vatRatePercent ?? 0) : 0),
       taxInclusivePricing: tax.taxInclusivePricing !== false,
       allowNegativeStock: Boolean(inventory.allowNegativeStock),
-      maxDiscountPctWithoutApproval: Number(pos.maxDiscountPercent ?? 15),
+      maxDiscountPctWithoutApproval: Number(pos.maxDiscountPercent ?? defaults.maxDiscountPctWithoutApproval),
+      requireReceiptForReturn: retail.requireReceiptForReturn ?? defaults.requireReceiptForReturn,
+      skuPrefix: String(retail.skuPrefix ?? defaults.skuPrefix),
+      barcodeFormat: retail.barcodeFormat ?? defaults.barcodeFormat,
+      stockValuationMethod: retail.stockValuationMethod ?? defaults.stockValuationMethod,
+      receiptHeader: String(retail.receiptHeader ?? defaults.receiptHeader),
+      receiptFooter: String(retail.receiptFooter ?? defaults.receiptFooter),
     };
   }
 
   async updateSettings(ctx: TenantContext, updates: Partial<RetailSettings>): Promise<RetailSettings> {
     const current = await this.getSettings(ctx);
     const updated: RetailSettings = { ...current, ...updates, tenantId: ctx.tenantId, branchId: ctx.branchId };
-    const existingTax: any = (await globalSettingsService.getSettings(ctx))["tax.config"] || {};
-    const existingPos: any = (await globalSettingsService.getSettings(ctx))["pos.config"] || {};
+    const currentSettings = await globalSettingsService.getSettings(ctx);
+    const existingTax: any = currentSettings["tax.config"] || {};
+    const existingPos: any = currentSettings["pos.config"] || {};
+    const existingInventory: any = currentSettings["inventory.config"] || {};
+    const existingRetail: any = currentSettings["retail.config"] || {};
     await globalSettingsService.upsertBatch(ctx, [
-      { key: "tax.config", scope: "BRANCH", value: { ...existingTax, currencyCode: updated.currency, vatRatePercent: updated.taxRatePct, taxInclusivePricing: updated.taxInclusivePricing } },
+      { key: "retail.config", scope: "BRANCH", value: {
+        ...existingRetail, currency: updated.currency, requireReceiptForReturn: updated.requireReceiptForReturn,
+        skuPrefix: updated.skuPrefix, barcodeFormat: updated.barcodeFormat, stockValuationMethod: updated.stockValuationMethod,
+        receiptHeader: updated.receiptHeader, receiptFooter: updated.receiptFooter,
+      } },
+      { key: "tax.config", scope: "BRANCH", value: {
+        ...existingTax, currencyCode: updated.currency, vatRatePercent: updated.taxRatePct,
+        vatEnabled: updated.taxRatePct > 0, taxInclusivePricing: updated.taxInclusivePricing,
+      } },
       { key: "pos.config", scope: "BRANCH", value: { ...existingPos, maxDiscountPercent: updated.maxDiscountPctWithoutApproval } },
+      { key: "inventory.config", scope: "BRANCH", value: { ...existingInventory, allowNegativeStock: updated.allowNegativeStock } },
     ]);
     return updated;
   }
@@ -155,61 +176,70 @@ export class RetailService {
     return sale;
   }
 
-  getReplenishmentSuggestions(ctx: TenantContext): RetailReplenishmentSuggestion[] {
-    const products = this.productService.getProducts(ctx);
-    const items: Array<{
-      productId: string;
-      variantId: string;
-      productName: string;
-      sku: string;
-      currentStock: number;
-      reorderLevel: number;
-      costPrice: number;
-    }> = [];
-
-    for (const p of products) {
-      const variants = p.variants || [];
-      for (const v of variants) {
-        const stock = this.stockRepo.getAvailableStock(ctx, v.id);
-        items.push({
-          productId: p.id,
-          variantId: v.id,
-          productName: `${p.name} - ${v.name}`,
-          sku: v.sku,
-          currentStock: stock,
-          reorderLevel: 10,
-          costPrice: v.costPrice,
-        });
-      }
+  private async getAuthoritativeRetailSignals(ctx: TenantContext) {
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [variants, stockRows, sales, returns] = await Promise.all([
+      prisma.productVariant.findMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true },
+        include: { product: true },
+      }),
+      prisma.stockLedger.groupBy({
+        by: ["variantId"],
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
+        _sum: { quantityChange: true },
+      }),
+      prisma.sale.findMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, status: "COMPLETED", soldAt: { gte: since } },
+        select: { lines: { select: { variantId: true, quantity: true } } },
+      }),
+      prisma.return.findMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, status: "COMPLETED", createdAt: { gte: since } },
+        select: { lines: { select: { variantId: true, quantityReturned: true } } },
+      }),
+    ]);
+    const stockByVariant = new Map<string, number>();
+    for (const row of stockRows) stockByVariant.set(row.variantId, Number(row._sum.quantityChange ?? 0));
+    const soldByVariant = new Map<string, number>();
+    for (const sale of sales) for (const line of sale.lines) {
+      soldByVariant.set(line.variantId, (soldByVariant.get(line.variantId) || 0) + Number(line.quantity));
     }
+    for (const ret of returns) for (const line of ret.lines) {
+      soldByVariant.set(line.variantId, Math.max(0, (soldByVariant.get(line.variantId) || 0) - Number(line.quantityReturned)));
+    }
+    return { variants, stockByVariant, soldByVariant };
+  }
 
+  async getReplenishmentSuggestions(ctx: TenantContext): Promise<RetailReplenishmentSuggestion[]> {
+    const signals = await this.getAuthoritativeRetailSignals(ctx);
+    const items = signals.variants.map((variant) => ({
+      productId: variant.productId,
+      variantId: variant.id,
+      productName: variant.product.name + " - " + variant.name,
+      sku: variant.sku,
+      currentStock: Math.max(0, (signals.stockByVariant.get(variant.id) || 0) - Number(variant.reservedQuantity || 0)),
+      reorderLevel: Math.max(0, Number(variant.reorderLevel || 0)),
+      costPrice: Number(variant.costPrice || 0),
+      preferredSupplierId: (variant.product as any).supplierId || undefined,
+    }));
     const salesVelocityMap = new Map<string, number>();
+    for (const variant of signals.variants) salesVelocityMap.set(variant.id, (signals.soldByVariant.get(variant.id) || 0) / 30);
     return this.getEngine().calculateReplenishmentSuggestions(items, salesVelocityMap);
   }
 
-  getAiRecommendations(ctx: TenantContext): RetailAiRecommendation[] {
-    const products = this.productService.getProducts(ctx);
-    const inventory: Array<{ variantId: string; productName: string; currentStock: number; reorderLevel: number; costPrice: number }> = [];
-
-    for (const p of products) {
-      for (const v of p.variants || []) {
-        const stock = this.stockRepo.getAvailableStock(ctx, v.id);
-        inventory.push({
-          variantId: v.id,
-          productName: `${p.name} (${v.name})`,
-          currentStock: stock,
-          reorderLevel: 10,
-          costPrice: v.costPrice,
-        });
-      }
-    }
-
-    const salesHistory = inventory.map((i) => ({
-      variantId: i.variantId,
-      sales30Days: Math.floor(Math.random() * 20),
+  async getAiRecommendations(ctx: TenantContext): Promise<RetailAiRecommendation[]> {
+    const signals = await this.getAuthoritativeRetailSignals(ctx);
+    const inventory = signals.variants.map((variant) => ({
+      variantId: variant.id,
+      productName: variant.product.name + " (" + variant.name + ")",
+      currentStock: Math.max(0, (signals.stockByVariant.get(variant.id) || 0) - Number(variant.reservedQuantity || 0)),
+      reorderLevel: Math.max(0, Number(variant.reorderLevel || 0)),
+      costPrice: Number(variant.costPrice || 0),
+    }));
+    const salesHistory = signals.variants.map((variant) => ({
+      variantId: variant.id,
+      sales30Days: signals.soldByVariant.get(variant.id) || 0,
       discountGiven: 0,
     }));
-
     return this.getEngine().generateExplainableAiRecommendations(ctx, inventory, salesHistory);
   }
 
