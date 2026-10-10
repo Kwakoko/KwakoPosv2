@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "@kwakopos2/database";
@@ -16,12 +16,8 @@ describe("Retail durable promotion and audit lifecycle", () => {
   };
   const service = new RetailService();
 
-  afterEach(async () => {
-    await prisma.auditEvent.deleteMany({ where: { tenantId, branchId } });
-    await prisma.pricingPromotion.deleteMany({ where: { tenantId, sourceModule: "RETAIL" } });
-    await prisma.branch.deleteMany({ where: { tenantId } });
-    await prisma.tenant.deleteMany({ where: { id: tenantId } });
-  });
+  // Each test uses a unique tenant. Do not delete audit events: the database
+  // enforces append-only audit retention by rejecting UPDATE and DELETE.
 
   it("persists supported promotions and audit events across service instances", async () => {
     await prisma.tenant.create({
