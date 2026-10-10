@@ -1513,8 +1513,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </div>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2.5">
-          {/* Quiet dashboard freshness metadata: useful for auditability without competing with business KPIs. */}
+        <div className="flex min-w-0 flex-col items-end gap-2.5">
+          {/* Quiet freshness metadata stays above the toolbar, aligned to the right. */}
           {isOnline && authoritativeKpis && (
             <span
               className="inline-flex items-center gap-2 text-[11px] font-semibold text-slate-400 whitespace-nowrap"
@@ -1534,47 +1534,61 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               )}
             </span>
           )}
-          {/* Status Badge 1: authoritative TRA VFD integration state */}
-          <button
-            type="button"
-            onClick={() => setIsVfdModalOpen(true)}
-            className={`h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border transition-all whitespace-nowrap shrink-0 cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${
-              !isOnline || !traVfdStatus
-                ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50 hover:border-slate-400'
-                : traVfdStatus.status === 'VERIFIED'
-                ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-700/50 hover:border-emerald-400'
-                : traVfdStatus.status === 'DISABLED'
-                ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50 hover:border-slate-400'
-                : 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50 hover:border-amber-400'
-            }`}
-            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-            title="Click to toggle TRA VFD on/off & view live gateway metrics"
-          >
-            <ShieldCheck className="h-4 w-4 shrink-0" />
-            <span>
-              TRA VFD: {!isOnline ? 'Offline' : traVfdStatus?.status === 'VERIFIED' ? 'Verified' : 'Disabled'}
-            </span>
-          </button>
 
-          {/* Status Badge 2: Offline Readiness */}
-          <span
-            className="h-10 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 whitespace-nowrap shrink-0"
-            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-          >
-            <Zap className="h-4 w-4 shrink-0" />
-            <span>Offline Mode: Available</span>
-          </span>
+          {/* Compact action toolbar aligned with the dashboard reference. */}
+          <div className="flex w-full flex-wrap items-center justify-end gap-2.5">
+            <button
+              type="button"
+              onClick={() => setIsVfdModalOpen(true)}
+              className={`h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border transition-all whitespace-nowrap shrink-0 cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${
+                !isOnline || !traVfdStatus
+                  ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50 hover:border-slate-400'
+                  : traVfdStatus.status === 'VERIFIED'
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-700/50 hover:border-emerald-400'
+                  : traVfdStatus.status === 'DISABLED'
+                  ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50 hover:border-slate-400'
+                  : 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300 border-amber-500/30 dark:border-amber-700/50 hover:border-amber-400'
+              }`}
+              style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+              title="Click to toggle TRA VFD on/off & view live gateway metrics"
+            >
+              <ShieldCheck className="h-4 w-4 shrink-0" />
+              <span>
+                TRA VFD: {!isOnline ? 'Offline' : traVfdStatus?.status === 'VERIFIED' ? 'Verified' : 'Disabled'}
+              </span>
+            </button>
 
-          {/* Primary Action Button: Launch POS (Matches OK Reference) */}
-          <button
-            type="button"
-            onClick={() => handleNav('POS')}
-            className="h-10 px-5 inline-flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary-hover text-xs font-bold text-white shadow-[0_0_18px_rgba(37,99,235,0.22)] transition-all cursor-pointer whitespace-nowrap shrink-0"
-            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-          >
-            <ShoppingCart className="h-4 w-4 shrink-0" />
-            <span>Launch POS</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setIsZReportOpen(true)}
+              className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold text-slate-700 dark:text-slate-100 whitespace-nowrap shrink-0 transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50"
+              style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+            >
+              <Printer className="h-4 w-4 shrink-0" />
+              <span>Daily Z-Report</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void exportDashboardSummaryCSV()}
+              className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold text-slate-700 dark:text-slate-100 whitespace-nowrap shrink-0 transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50"
+              style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+              title="Export dashboard audit summary workbook"
+            >
+              <Download className="h-4 w-4 shrink-0" />
+              <span>Export Report</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleNav('POS')}
+              className="h-10 px-5 inline-flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary-hover text-xs font-bold text-white shadow-[0_0_18px_rgba(37,99,235,0.22)] transition-all cursor-pointer whitespace-nowrap shrink-0"
+              style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+            >
+              <ShoppingCart className="h-4 w-4 shrink-0" />
+              <span>Launch POS</span>
+            </button>
+          </div>
         </div>
       </div>
 
