@@ -72,6 +72,8 @@ jobs:
         run: npx tsx scripts/certification/conflict-center-production-lock.ts
       - name: Inventory Production Lock v1
         run: npm run certify:inventory-lock
+      - name: Retail Production Lock v1
+        run: npm run certify:retail-lock
       - name: Administration Production Lock
         run: npm run certify:administration-lock
       - name: Sales Production Lock v1
