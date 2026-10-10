@@ -346,17 +346,22 @@ export class WorldStandardPrismaSyncEngine {
     source: string,
     db: any,
   ): Promise<void> {
-    if (op.operationType !== "CREATE") return;
-
-    // These business commands can atomically create one or more immutable
-    // StockLedger rows. The ledger rows are inventory truth, so every row must be
-    // independently replayable by downstream replicas.
-    const generatedLedgerTypes = new Set(["StockAdjustment", "Sale", "PurchaseReceipt", "UnitConversionTransaction"]);
-    if (!generatedLedgerTypes.has(op.entityType)) return;
+    // Inventory production-lock commands can create ledger rows on CREATE and
+    // on their explicit posting/receiving UPDATE. Every row must be journaled
+    // because StockLedger remains the portable inventory truth for all replicas.
+    const generatedLedgerTypes = new Set([
+      "StockAdjustment", "Sale", "PurchaseReceipt", "UnitConversionTransaction",
+      "StockTransfer", "StockCount", "ProductBundle", "WastageRecord",
+    ]);
+    const updateCanGenerateLedger = new Set(["StockTransfer", "StockCount", "ProductBundle"]);
+    if (!generatedLedgerTypes.has(op.entityType) ||
+        (op.operationType !== "CREATE" && !updateCanGenerateLedger.has(op.entityType))) return;
 
     const operationIdFilter = op.entityType === "UnitConversionTransaction"
       ? { startsWith: `${op.operationId}-` }
-      : op.operationId;
+      : updateCanGenerateLedger.has(op.entityType)
+        ? { startsWith: `${op.operationId}:` }
+        : op.operationId;
     const ledgers = await db.stockLedger.findMany({
       where: {
         tenantId: ctx.tenantId,
@@ -413,8 +418,10 @@ export class WorldStandardPrismaSyncEngine {
               so.operation_type AS "operationType", so.payload
          FROM sync_operations so
         WHERE so.tenant_id = $1 AND so.branch_id = $2 AND so.status = 'PROCESSED'
-          AND so.operation_type = 'CREATE'
-          AND so.entity_type IN ('StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction')
+          AND so.entity_type IN (
+            'StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction',
+            'StockTransfer', 'StockCount', 'ProductBundle', 'WastageRecord'
+          )
           AND NOT EXISTS (
             SELECT 1 FROM sync_change_journal cj
              WHERE cj.tenant_id = so.tenant_id
