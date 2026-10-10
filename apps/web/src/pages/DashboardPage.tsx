@@ -1590,15 +1590,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           <button type="button" onClick={() => void refreshAuthoritativeKpis()} className="ml-2 underline">Retry</button>
         </div>
       )}
-      <div className="grid grid-cols-12 gap-4">
-        <div className="col-span-12 lg:col-span-4">
+      <div className="dashboard-reference-kpi-grid">
+        <div>
           <ReferenceKPICard title="Today's Sales"
             value={kpiCards.find((card) => card.title === 'Sales Today')?.value?.toString() || '--'}
             icon={<Layers className="h-6 w-6" />} accent="#3b82f6" trend={stats.salesTrendPct}
             description="Completed sales recorded by Point of Sale" variant="hero"
             spark={[28, 34, 31, 43, 38, 50, 45, 58]} />
         </div>
-        <div className="col-span-12 lg:col-span-4">
+        <div>
           <ReferenceKPICard title="Gross Profit (REAL)"
             value={kpiCards.find((card) => card.title === 'Gross Profit')?.value?.toString() || '--'}
             icon={<TrendingUp className="h-6 w-6" />} accent="#10b981"
@@ -1608,35 +1608,42 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             description="Completed-sales gross profit from PostgreSQL" variant="hero"
             spark={[34, 39, 36, 46, 41, 53, 48, 62]} />
         </div>
-        <div className="col-span-12 lg:col-span-4">
+        <div>
           <ReferenceKPICard title="Avg Order Value (AOV)"
             value={kpiCards.find((card) => card.title === 'Average Order Value')?.value?.toString() || '--'}
             icon={<ShoppingCart className="h-6 w-6" />} accent="#6366f1" trend={stats.aovTrendPct}
             description="Completed sales value divided by completed orders" variant="hero"
             spark={[22, 29, 28, 37, 33, 44, 39, 51]} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div>
+          <ReferenceKPICard title="Total Products"
+            value={kpiCards.find((card) => card.title === 'Total Products')?.value?.toString() || '0'}
+            icon={<Package className="h-6 w-6" />} accent="#f59e0b"
+            description="Active products in the current branch" variant="hero"
+            spark={[18, 24, 21, 30, 27, 35, 31, 40]} />
+        </div>
+        <div>
           <ReferenceKPICard title="Stock Alerts"
             value={kpiCards.find((card) => card.title === 'Stock Alerts')?.value?.toString() || '0'}
             icon={<AlertTriangle className="h-5 w-5" />} accent="#ef4444"
             description="Low-stock plus out-of-stock variants"
             spark={[22, 30, 25, 34, 29, 38, 33, 42]} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div>
           <ReferenceKPICard title="Customer Debts"
             value={kpiCards.find((card) => card.title === 'Customer Debts')?.value?.toString() || 'Tsh 0'}
             icon={<Users className="h-5 w-5" />} accent="#8b5cf6"
             description="Current customer receivables in the branch"
             spark={[16, 22, 19, 27, 23, 31, 27, 36]} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div>
           <ReferenceKPICard title="Inventory Value"
             value={kpiCards.find((card) => card.title === 'Inventory Value')?.value?.toString() || 'Tsh 0'}
             icon={<Package className="h-5 w-5" />} accent="#ec4899"
             description="Current branch stock valuation"
             spark={[19, 26, 23, 32, 29, 39, 34, 45]} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div>
           <ReferenceKPICard title="Device Sync"
             value={kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0'}
             icon={<RefreshCw className="h-5 w-5" />} accent="#f97316"
