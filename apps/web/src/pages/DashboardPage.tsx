@@ -25,7 +25,7 @@ import {
   TrendingUp, TrendingDown, DollarSign, Package, Users,
   AlertTriangle, Clock, PiggyBank, Briefcase,
   Sparkles, Layers, Egg, Footprints, Truck, ArrowRight, Calendar,
-  ShoppingCart, BarChart2, CheckCircle, RefreshCw, Zap, Star,
+  ShoppingCart, BarChart2, CheckCircle, RefreshCw, Star,
   Banknote, CreditCard, Smartphone, Building2, ArrowLeftRight, Wallet, Flame,
   Printer, Award, Eye, User, Download, UserCheck, ShieldCheck
 } from 'lucide-react';
@@ -204,12 +204,11 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
     return x + ',' + y;
   }).join(' ');
   const area = '0,' + height + ' ' + points + ' ' + width + ',' + height;
-  const cardClass = 'relative overflow-hidden rounded-xl border transition-all duration-200 ' +
-    (onClick ? 'cursor-pointer hover:-translate-y-0.5 ' : '') +
-    (variant === 'hero' ? 'min-h-[198px] p-5' : 'min-h-[126px] p-4');
-  const iconClass = (variant === 'hero' ? 'h-11 w-11 rounded-xl' : 'h-10 w-10 rounded-xl') +
-    ' flex items-center justify-center shrink-0';
-  const valueClass = (variant === 'hero' ? 'mt-5 text-[38px]' : 'mt-3 text-[27px]') +
+  const cardClass = 'dashboard-kpi-card dashboard-kpi-card--' + variant +
+    ' relative overflow-hidden rounded-xl border transition-all duration-200 ' +
+    (onClick ? 'cursor-pointer hover:-translate-y-0.5' : '');
+  const iconClass = 'dashboard-kpi-icon flex items-center justify-center shrink-0';
+  const valueClass = 'dashboard-kpi-value dashboard-kpi-value--' + variant +
     ' font-black leading-none tracking-tight text-white';
 
   return (
@@ -223,18 +222,18 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
         (variant === 'hero' ? '-right-8 -top-10 h-32 w-32' : '-right-6 -top-8 h-24 w-24')}
         style={{ background: accent }} />
       <div className="relative z-10 flex items-start justify-between gap-4">
-        <div className="min-w-0">
+        <div className="dashboard-kpi-copy min-w-0">
           <div className="flex items-center gap-3">
             <div className={iconClass} style={{ background: accent + '22', color: accent }}>
               {icon}
             </div>
             <div>
-              <p className="text-[12px] font-black uppercase tracking-wide" style={{ color: '#6b86ad' }}>{title}</p>
+              <p className="dashboard-kpi-title font-black uppercase tracking-wide" style={{ color: '#6b86ad' }}>{title}</p>
               {trend && <p className="mt-1 text-[11px] font-semibold text-emerald-400">{'↑'} {trend}</p>}
             </div>
           </div>
           <p className={valueClass}>{value}</p>
-          <p className="mt-3 max-w-[90%] text-[11px] leading-relaxed" style={{ color: '#6b86ad' }}>{description}</p>
+          <p className="dashboard-kpi-description" style={{ color: '#6b86ad' }}>{description}</p>
           {action && (
             <button type="button"
               onClick={(e) => { e.stopPropagation(); action.onClick(); }}
@@ -245,8 +244,8 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
             </button>
           )}
         </div>
-        <svg width={variant === 'hero' ? 118 : 100} height={variant === 'hero' ? 58 : 48}
-          viewBox={'0 0 ' + width + ' ' + height} className="mt-8 shrink-0 overflow-visible" aria-hidden="true">
+        <svg width={variant === 'hero' ? 84 : 76} height={variant === 'hero' ? 38 : 34}
+          viewBox={'0 0 ' + width + ' ' + height} className="mt-3 shrink-0 overflow-visible dashboard-kpi-sparkline" aria-hidden="true">
           <polygon points={area} fill={accent} opacity="0.10" />
           <polyline points={points} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -1513,8 +1512,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </div>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2.5">
-          {/* Quiet dashboard freshness metadata: useful for auditability without competing with business KPIs. */}
+        <div className="flex min-w-0 flex-col items-end gap-2.5">
+          {/* Quiet freshness metadata stays above the toolbar, aligned to the right. */}
           {isOnline && authoritativeKpis && (
             <span
               className="inline-flex items-center gap-2 text-[11px] font-semibold text-slate-400 whitespace-nowrap"
@@ -1534,47 +1533,61 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               )}
             </span>
           )}
-          {/* Status Badge 1: authoritative TRA VFD integration state */}
-          <button
-            type="button"
-            onClick={() => setIsVfdModalOpen(true)}
-            className={`h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border transition-all whitespace-nowrap shrink-0 cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${
-              !isOnline || !traVfdStatus
-                ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50 hover:border-slate-400'
-                : traVfdStatus.status === 'VERIFIED'
-                ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-700/50 hover:border-emerald-400'
-                : traVfdStatus.status === 'DISABLED'
-                ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50 hover:border-slate-400'
-                : 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50 hover:border-amber-400'
-            }`}
-            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-            title="Click to toggle TRA VFD on/off & view live gateway metrics"
-          >
-            <ShieldCheck className="h-4 w-4 shrink-0" />
-            <span>
-              TRA VFD: {!isOnline ? 'Offline' : traVfdStatus?.status === 'VERIFIED' ? 'Verified' : 'Disabled'}
-            </span>
-          </button>
 
-          {/* Status Badge 2: Offline Readiness */}
-          <span
-            className="h-10 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 whitespace-nowrap shrink-0"
-            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-          >
-            <Zap className="h-4 w-4 shrink-0" />
-            <span>Offline Mode: Available</span>
-          </span>
+          {/* Compact action toolbar aligned with the dashboard reference. */}
+          <div className="flex w-full flex-wrap items-center justify-end gap-2.5">
+            <button
+              type="button"
+              onClick={() => setIsVfdModalOpen(true)}
+              className={`h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border transition-all whitespace-nowrap shrink-0 cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${
+                !isOnline || !traVfdStatus
+                  ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50 hover:border-slate-400'
+                  : traVfdStatus.status === 'VERIFIED'
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-700/50 hover:border-emerald-400'
+                  : traVfdStatus.status === 'DISABLED'
+                  ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50 hover:border-slate-400'
+                  : 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300 border-amber-500/30 dark:border-amber-700/50 hover:border-amber-400'
+              }`}
+              style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+              title="Click to toggle TRA VFD on/off & view live gateway metrics"
+            >
+              <ShieldCheck className="h-4 w-4 shrink-0" />
+              <span>
+                TRA VFD: {!isOnline ? 'Offline' : traVfdStatus?.status === 'VERIFIED' ? 'Verified' : 'Disabled'}
+              </span>
+            </button>
 
-          {/* Primary Action Button: Launch POS (Matches OK Reference) */}
-          <button
-            type="button"
-            onClick={() => handleNav('POS')}
-            className="h-10 px-5 inline-flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary-hover text-xs font-bold text-white shadow-[0_0_18px_rgba(37,99,235,0.22)] transition-all cursor-pointer whitespace-nowrap shrink-0"
-            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-          >
-            <ShoppingCart className="h-4 w-4 shrink-0" />
-            <span>Launch POS</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setIsZReportOpen(true)}
+              className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold text-slate-700 dark:text-slate-100 whitespace-nowrap shrink-0 transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50"
+              style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+            >
+              <Printer className="h-4 w-4 shrink-0" />
+              <span>Daily Z-Report</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void exportDashboardSummaryCSV()}
+              className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold text-slate-700 dark:text-slate-100 whitespace-nowrap shrink-0 transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50"
+              style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+              title="Export dashboard audit summary workbook"
+            >
+              <Download className="h-4 w-4 shrink-0" />
+              <span>Export Report</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleNav('POS')}
+              className="h-10 px-5 inline-flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary-hover text-xs font-bold text-white shadow-[0_0_18px_rgba(37,99,235,0.22)] transition-all cursor-pointer whitespace-nowrap shrink-0"
+              style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+            >
+              <ShoppingCart className="h-4 w-4 shrink-0" />
+              <span>Launch POS</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1590,15 +1603,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           <button type="button" onClick={() => void refreshAuthoritativeKpis()} className="ml-2 underline">Retry</button>
         </div>
       )}
-      <div className="grid grid-cols-12 gap-4">
-        <div className="col-span-12 lg:col-span-4">
+      <div className="dashboard-reference-kpi-grid">
+        <div>
           <ReferenceKPICard title="Today's Sales"
             value={kpiCards.find((card) => card.title === 'Sales Today')?.value?.toString() || '--'}
             icon={<Layers className="h-6 w-6" />} accent="#3b82f6" trend={stats.salesTrendPct}
             description="Completed sales recorded by Point of Sale" variant="hero"
             spark={[28, 34, 31, 43, 38, 50, 45, 58]} />
         </div>
-        <div className="col-span-12 lg:col-span-4">
+        <div>
           <ReferenceKPICard title="Gross Profit (REAL)"
             value={kpiCards.find((card) => card.title === 'Gross Profit')?.value?.toString() || '--'}
             icon={<TrendingUp className="h-6 w-6" />} accent="#10b981"
@@ -1608,35 +1621,42 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             description="Completed-sales gross profit from PostgreSQL" variant="hero"
             spark={[34, 39, 36, 46, 41, 53, 48, 62]} />
         </div>
-        <div className="col-span-12 lg:col-span-4">
+        <div>
           <ReferenceKPICard title="Avg Order Value (AOV)"
             value={kpiCards.find((card) => card.title === 'Average Order Value')?.value?.toString() || '--'}
             icon={<ShoppingCart className="h-6 w-6" />} accent="#6366f1" trend={stats.aovTrendPct}
             description="Completed sales value divided by completed orders" variant="hero"
             spark={[22, 29, 28, 37, 33, 44, 39, 51]} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div>
+          <ReferenceKPICard title="Total Products"
+            value={kpiCards.find((card) => card.title === 'Total Products')?.value?.toString() || '0'}
+            icon={<Package className="h-6 w-6" />} accent="#f59e0b"
+            description="Active products in the current branch" variant="hero"
+            spark={[18, 24, 21, 30, 27, 35, 31, 40]} />
+        </div>
+        <div>
           <ReferenceKPICard title="Stock Alerts"
             value={kpiCards.find((card) => card.title === 'Stock Alerts')?.value?.toString() || '0'}
             icon={<AlertTriangle className="h-5 w-5" />} accent="#ef4444"
             description="Low-stock plus out-of-stock variants"
             spark={[22, 30, 25, 34, 29, 38, 33, 42]} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div>
           <ReferenceKPICard title="Customer Debts"
             value={kpiCards.find((card) => card.title === 'Customer Debts')?.value?.toString() || 'Tsh 0'}
             icon={<Users className="h-5 w-5" />} accent="#8b5cf6"
             description="Current customer receivables in the branch"
             spark={[16, 22, 19, 27, 23, 31, 27, 36]} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div>
           <ReferenceKPICard title="Inventory Value"
             value={kpiCards.find((card) => card.title === 'Inventory Value')?.value?.toString() || 'Tsh 0'}
             icon={<Package className="h-5 w-5" />} accent="#ec4899"
             description="Current branch stock valuation"
             spark={[19, 26, 23, 32, 29, 39, 34, 45]} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div>
           <ReferenceKPICard title="Device Sync"
             value={kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0'}
             icon={<RefreshCw className="h-5 w-5" />} accent="#f97316"
