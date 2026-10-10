@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { ALL_MODULE_KEYS, MODULE_MANIFESTS } from "../../apps/web/src/modules/moduleRegistry.js";
 
-const LOCK_ID = "NAVIGATION-PRODUCTION-LOCK-2026-10-03";
+const LOCK_ID = "NAVIGATION-PRODUCTION-LOCK-2026-10-10";
 const EXPECTED_MODULE_COUNT = 32;
 const EXPECTED_SUBMENU_GROUPS = 126;
 const EXPECTED_SUBITEM_COUNT = 659;
@@ -14,7 +14,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/App.tsx": "a67c77edd34362b241599ed2b5f28b6f55a7acd2",
   "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
   "apps/web/src/pages/VerticalCommandCenterPage.tsx": "dc932c2adf63194e6af11ed340be7ba43f9d498f",
-  "apps/web/src/pages/DashboardPage.tsx": "59b98fc129531507362218674b135597bf224f8d",
+  "apps/web/src/pages/DashboardPage.tsx": "efdd50c89ebe793382c3b976558a9fbdab4d7701",
   "apps/web/src/pages/InventoryPage.tsx": "1aada87ec4442b426973a2bba97c3d920fa86f04",
   "apps/web/src/pages/PurchasingPage.tsx": "ab0650f3cbd59906f8286a2ca11e2b46898933e2",
   "apps/web/src/pages/ReportsPage.tsx": "0215ab6d294a164bc3c83b22717e73abcea27cee",
