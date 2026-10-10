@@ -10,6 +10,7 @@ import {
   persistDomainEvent,
   publishPendingDomainEvents,
 } from "./durableDomainEventBridge.js";
+import { applyInventoryProductionLockOperation } from "./inventoryProductionLock.js";
 
 const MAX_DELTA = 500;
 
@@ -447,6 +448,14 @@ export class WorldStandardPrismaSyncEngine {
     if (preconditionedEntities.has(op.entityType) && ["UPDATE", "DELETE"].includes(op.operationType)) {
       requireBaseUpdatedAt(op.payload, op.entityType);
     }
+
+    if (await applyInventoryProductionLockOperation(
+      ctx,
+      req,
+      op,
+      tx,
+      (priceCtx, priceRequest, transaction) => this.productRepo.recordPriceChange(priceCtx, priceRequest, transaction),
+    )) return;
 
     if (op.entityType === "Setting" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
       const payload: any = stripSyncControlFields(op.payload as any);
