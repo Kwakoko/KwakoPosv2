@@ -100,6 +100,15 @@ describe("Retail Industry Module Operating System Test Suite", () => {
     expect(invalidRes.error).toContain("exceeds original sold quantity");
   });
 
+  it("should reject duplicate non-empty barcodes within the same tenant and branch", () => {
+    const products = [{ id: "p1", tenantId: dummyCtx.tenantId, branchId: dummyCtx.branchId }] as any;
+    const variants = [
+      { id: "v1", tenantId: dummyCtx.tenantId, branchId: dummyCtx.branchId, productId: "p1", sku: "SKU-1", barcode: "12345" },
+      { id: "v2", tenantId: dummyCtx.tenantId, branchId: dummyCtx.branchId, productId: "p1", sku: "SKU-2", barcode: " 12345 " },
+    ] as any;
+    expect(() => engine.assertRetailInvariants(products, variants, [], [])).toThrow(/Duplicate barcode breach/);
+  });
+
   it("should reconcile till session cash variances accurately", () => {
     // Opening: 100,000, Sales: 500,000, Refunds: 50,000, Expenses: 20,000 -> Expected: 530,000
     const rec1 = engine.reconcileTillSessionCash(100000, 500000, 50000, 20000, 530000);
