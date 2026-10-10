@@ -463,7 +463,7 @@ export class RetailEngine {
     reason?: string
   ): RetailAuditEvent {
     return {
-      eventId: `AUDIT-${randomUUID().slice(0, 8)}`,
+      eventId: `AUDIT-${randomUUID()}`,
       tenantId: ctx.tenantId,
       branchId: ctx.branchId,
       userId: ctx.userId,
