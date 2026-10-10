@@ -28,7 +28,7 @@ describe("Inventory Production Lock v1 source contract", () => {
     const page = fs.readFileSync(path.join(root, "apps/web/src/pages/InventoryPage.tsx"), "utf8");
     const sync = fs.readFileSync(path.join(root, "packages/sync/src/inventoryProductionLock.ts"), "utf8");
     expect(page).toContain('entityType: "ProductPriceHistory"');
-    expect(page).toContain("saveProductPriceHistoryLocal");
+    expect(page).toContain("commitLocalOutboxes");
     expect(sync).toContain('op.entityType === "ProductPriceHistory"');
     expect(page).not.toContain("Version #2 · 11 July 2026");
     expect(page).not.toContain("Supplier Price Increase</em>");
@@ -39,10 +39,12 @@ describe("Inventory Production Lock v1 source contract", () => {
     for (const tab of ["transfers", "count", "recipes", "wastage"]) {
       expect(page).toContain('activeTab === "' + tab + '"');
     }
-    expect(page).toContain('queueInventoryOperation("StockTransfer"');
-    expect(page).toContain('queueInventoryOperation("StockCount"');
-    expect(page).toContain('queueInventoryOperation("ProductBundle"');
-    expect(page).toContain('queueInventoryOperation("WastageRecord"');
+    const operational = fs.readFileSync(path.join(root, "apps/web/src/components/InventoryOperationalWorkspace.tsx"), "utf8");
+    const bundles = fs.readFileSync(path.join(root, "apps/web/src/components/InventoryBundleWorkspace.tsx"), "utf8");
+    expect(operational).toContain('entityType: "StockTransfer"');
+    expect(operational).toContain('entityType: "StockCount"');
+    expect(operational).toContain('entityType: "WastageRecord"');
+    expect(bundles).toContain('entityType: "ProductBundle"');
   });
 
   it("persists product and variant mutations with branch context", () => {
