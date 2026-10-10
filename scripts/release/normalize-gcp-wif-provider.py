@@ -89,6 +89,17 @@ def normalize(value: str) -> str:
     # only at the whole-value boundary; never rewrite characters inside IDs.
     provider = _strip_boundary_format_marks(value.strip().strip("\ufeff"))
 
+    # GitHub Actions secrets are sometimes copied from an environment file with
+    # the variable assignment included. Strip only the two explicitly supported
+    # setting names; never accept arbitrary prefixes or print the supplied value.
+    assignment = re.match(
+        r"^(?:export\s+)?(?:GCP_WIF_PROVIDER|GCP_WORKLOAD_IDENTITY_PROVIDER)\s*=\s*",
+        provider,
+        flags=re.IGNORECASE,
+    )
+    if assignment is not None:
+        provider = provider[assignment.end():].strip()
+
     # A secret copied through an editor may contain line-wraps. Remove only
     # CR/LF boundaries and adjacent horizontal indentation; all other content
     # remains subject to the strict resource-shape check below.
