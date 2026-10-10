@@ -30,7 +30,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "tests/unit/retail-authorization.test.ts": "3f1dd25462a34ebce98b83bd82ce5b4d742458ad",
   "tests/integration/commercial-api.test.ts": "48147a6e0b6d649329093559d84e2b9b625f6633",
   "tests/integration/inventory-production-lock-lifecycle.test.ts": "c548f9983375a7ad745093e03b2ca29136cce726",
-  "tests/integration/retail-persistence.test.ts": "1d89ead9cb77763e0b5e1114da689024a433fd0d",
+  "tests/integration/retail-persistence.test.ts": "6f4de5a47fc4c31cae4a9fa59a19792a52440c77",
 };
 
 function read(relativePath: string): string {
