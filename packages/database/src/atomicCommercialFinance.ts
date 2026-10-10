@@ -27,8 +27,14 @@ export class PrismaAtomicCommercialFinanceService {
   }
 
   async writeJournal(tx: any, ctx: TenantContext, built: any) {
-    const existing = await tx.journalEntry.findUnique({ where: { idempotencyKey: built.journal.idempotencyKey } }).catch(() => null);
+    const journalIdempotencyKey = String(built.journal.idempotencyKey || "").trim();
+    const existing = journalIdempotencyKey && typeof tx.journalEntry.findFirst === "function"
+      ? await tx.journalEntry.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: journalIdempotencyKey } }).catch(() => null)
+      : null;
     if (existing) {
+      if (existing.sourceType !== built.journal.sourceType || (existing.sourceId ?? null) !== (built.journal.sourceId ?? null)) {
+        throw new Error("JOURNAL_IDEMPOTENCY_CONFLICT");
+      }
       const lines = await tx.journalLine.findMany({ where: { journalEntryId: existing.id } });
       return { journal: existing, lines };
     }
@@ -57,6 +63,232 @@ export class PrismaAtomicCommercialFinanceService {
     } });
     const lines = await Promise.all((built.lines || []).map((l: any) => tx.journalLine.create({ data: { id: l.id, journalEntryId: j.id, accountId: l.accountId, costCenterId: l.costCenterId ?? null, description: l.description ?? null, debit: l.debit, credit: l.credit, currency: l.currency ?? built.journal.currency, exchangeRate: l.exchangeRate ?? 1 } })));
     return { journal: j, lines };
+  }
+
+  async reversePayment(ctx: TenantContext, paymentId: string, reason: string) {
+    return this.db.$transaction((tx: any) => this.reversePaymentInTransaction(ctx, paymentId, reason, tx));
+  }
+
+  async refundPayment(ctx: TenantContext, paymentId: string, request: {
+    amount: number; reason: string; refundMethod: string; provider?: string; providerReference?: string; idempotencyKey: string;
+  }) {
+    return this.db.$transaction((tx: any) => this.refundPaymentInTransaction(ctx, paymentId, request, tx));
+  }
+  async getFinancialAccountLookup(ctx: TenantContext, tx: any = this.db) {
+    return this.accounts(tx, ctx);
+  }
+
+  async postFinancialJournal(ctx: TenantContext, built: any, tx: any = this.db) {
+    return this.writeJournal(tx, ctx, built);
+  }
+
+  async reversePaymentInTransaction(ctx: TenantContext, paymentId: string, reason: string, tx: any) {
+    const payment = await tx.payment.findFirst({ where: { id: paymentId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!payment) throw new Error("PAYMENT_NOT_FOUND");
+    if (payment.isRefund) throw new Error("PAYMENT_REFUND_CANNOT_BE_REVERSED_AS_ORIGINAL");
+    if (payment.saleId) throw new Error("PAYMENT_SALE_REVERSAL_REQUIRES_RETURN");
+    const existingReversal = await tx.payment.findFirst({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, reversalOfPaymentId: payment.id, isRefund: false },
+    });
+    if (existingReversal) return existingReversal;
+    if (payment.reversedAt || payment.status === "REVERSED") throw new Error("PAYMENT_REVERSAL_ALREADY_RECORDED");
+    if (payment.status !== "COMPLETED") throw new Error("PAYMENT_REVERSAL_REQUIRES_COMPLETED_PAYMENT");
+
+    const originalJournal = await tx.journalEntry.findFirst({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, sourceType: "PAYMENT", sourceId: payment.id, status: "POSTED" },
+      include: { lines: true },
+    });
+    if (!originalJournal || !originalJournal.lines?.length) throw new Error("PAYMENT_REVERSAL_JOURNAL_NOT_FOUND");
+    const journalNumber = `REV-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const built = AccountingEngine.createReversalJournal(ctx, originalJournal as any, originalJournal.lines as any, reason, journalNumber);
+    await this.writeJournal(tx, ctx, { journal: built.reversalJournal, lines: built.reversalLines });
+
+    const now = new Date();
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: { status: "REVERSED", reversalReason: reason, reversedAt: now, reversedById: ctx.userId },
+    });
+    const reversal = await tx.payment.create({
+      data: {
+        id: randomUUID(),
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        paymentNumber: `REV-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+        purchaseReceiptId: payment.purchaseReceiptId,
+        customerId: payment.customerId,
+        supplierId: payment.supplierId,
+        amount: payment.amount,
+        paymentMethod: payment.paymentMethod,
+        provider: payment.provider,
+        providerReference: payment.providerReference,
+        status: "REVERSED",
+        reconciliationStatus: "MATCHED",
+        reversalOfPaymentId: payment.id,
+        reversalReason: reason,
+        reversedAt: now,
+        reversedById: ctx.userId,
+        idempotencyKey: `PAYMENT-REVERSAL-${payment.id}`,
+        paidAt: now,
+      },
+    });
+    await tx.auditEvent.create({
+      data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "payment-sync", action: "PAYMENT_REVERSED", entityType: "Payment", entityId: payment.id,
+        metadata: { reversalPaymentId: reversal.id, reason, reversalJournalId: built.reversalJournal.id },
+      },
+    });
+    return reversal;
+  }
+  async refundPaymentInTransaction(ctx: TenantContext, paymentId: string, request: {
+    amount: number; reason: string; refundMethod: string; provider?: string; providerReference?: string; idempotencyKey: string;
+  }, tx: any) {
+    const idempotencyKey = String(request.idempotencyKey || "").trim();
+    if (!idempotencyKey) throw new Error("PAYMENT_REFUND_IDEMPOTENCY_KEY_REQUIRED");
+    const existingRefund = await tx.payment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey } }).catch(() => null);
+    if (existingRefund) {
+      if (!existingRefund.isRefund || existingRefund.reversalOfPaymentId !== paymentId ||
+          existingRefund.tenantId !== ctx.tenantId || existingRefund.branchId !== ctx.branchId) {
+        throw new Error("PAYMENT_REFUND_IDEMPOTENCY_CONFLICT");
+      }
+      return existingRefund;
+    }
+
+    const original = await tx.payment.findFirst({ where: { id: paymentId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!original) throw new Error("PAYMENT_NOT_FOUND");
+    if (original.isRefund || original.reversedAt || original.status !== "COMPLETED") throw new Error("PAYMENT_REFUND_REQUIRES_COMPLETED_ORIGINAL");
+    if (original.saleId) throw new Error("PAYMENT_SALE_REFUND_REQUIRES_RETURN");
+    const amount = Number(request.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("PAYMENT_REFUND_AMOUNT_INVALID");
+    const priorRefunds = await tx.payment.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, reversalOfPaymentId: paymentId, isRefund: true },
+      select: { amount: true },
+    });
+    const alreadyRefunded = priorRefunds.reduce((sum: number, row: any) => sum + Number(row.amount), 0);
+    const remaining = Number(original.amount) - alreadyRefunded;
+    if (amount > remaining + 0.000001) throw new Error("PAYMENT_REFUND_EXCEEDS_REMAINING_AMOUNT");
+
+    const originalJournal = await tx.journalEntry.findFirst({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, sourceType: "PAYMENT", sourceId: original.id },
+      include: { lines: true },
+    });
+    if (!originalJournal || !originalJournal.lines?.length) throw new Error("PAYMENT_REFUND_JOURNAL_NOT_FOUND");
+    const ratio = amount / Number(original.amount);
+    const refundId = randomUUID();
+    const refundPayment = await tx.payment.create({
+      data: {
+        id: refundId,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        paymentNumber: `REF-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+        saleId: original.saleId,
+        purchaseReceiptId: original.purchaseReceiptId,
+        customerId: original.customerId,
+        supplierId: original.supplierId,
+        amount,
+        paymentMethod: request.refundMethod,
+        provider: request.provider || original.provider,
+        providerReference: request.providerReference || null,
+        status: "REFUNDED",
+        isRefund: true,
+        reversalOfPaymentId: original.id,
+        refundReason: request.reason,
+        refundMethod: request.refundMethod,
+        refundProvider: request.provider || original.provider,
+        refundProviderReference: request.providerReference || null,
+        idempotencyKey,
+        paidAt: new Date(),
+        reconciliationStatus: "MATCHED",
+        reconciliationReference: request.providerReference || null,
+      },
+    });
+
+    const built = AccountingEngine.createJournalEntry(ctx, {
+      journalNumber: `JRN-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${randomUUID().slice(0, 8).toUpperCase()}`,
+      sourceType: "REVERSAL",
+      sourceId: refundId,
+      description: `Refund of payment ${original.paymentNumber}: ${request.reason}`,
+      idempotencyKey: `jrn-pay-refund-${idempotencyKey}`,
+      lines: originalJournal.lines.map((line: any) => ({
+        accountId: line.accountId,
+        costCenterId: line.costCenterId ?? undefined,
+        description: `Refund: ${line.description || original.paymentNumber}`,
+        debit: Number((Number(line.credit) * ratio).toFixed(2)),
+        credit: Number((Number(line.debit) * ratio).toFixed(2)),
+      })),
+    });
+    built.journal.isReversal = true;
+    built.journal.reversalOfJournalId = originalJournal.id;
+    built.journal.reversalReason = request.reason;
+    await this.writeJournal(tx, ctx, built);
+    const totalRefunded = alreadyRefunded + amount;
+    const originalPaymentStatus = totalRefunded >= Number(original.amount) - 0.000001 ? "REFUNDED" : "PARTIALLY_REFUNDED";
+    await tx.payment.update({
+      where: { id: original.id },
+      data: { refundedAmount: totalRefunded, status: originalPaymentStatus },
+    });
+    await tx.auditEvent.create({
+      data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "payment-sync", action: "PAYMENT_REFUNDED", entityType: "Payment", entityId: original.id,
+        metadata: { originalPaymentId: original.id, refundPaymentId: refundId, amount, reason: request.reason, idempotencyKey },
+      },
+    });
+    return refundPayment;
+  }
+
+  async confirmProviderPaymentInTransaction(ctx: TenantContext, paymentId: string, request: {
+    amount: number; provider?: string; providerReference?: string; providerEventId?: string; externalReference?: string;
+  }, tx: any) {
+    const payment = await tx.payment.findFirst({ where: { id: paymentId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!payment) throw new Error("PAYMENT_NOT_FOUND");
+    const eventId = String(request.providerEventId || "").trim();
+    const provider = String(request.provider || "").trim();
+    const reference = String(request.providerReference || request.externalReference || "").trim();
+    if (!eventId || !provider || !reference) throw new Error("PAYMENT_PROVIDER_CONFIRMATION_EVIDENCE_REQUIRED");
+    const existingEvent = await tx.payment.findFirst({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, providerEventId: eventId },
+    });
+    if (existingEvent && existingEvent.id !== payment.id) throw new Error("PAYMENT_PROVIDER_EVENT_REPLAY");
+    if (existingEvent && payment.status === "COMPLETED") return payment;
+    if (!Number.isFinite(Number(request.amount)) || Math.abs(Number(request.amount) - Number(payment.amount)) > 0.005) {
+      throw new Error("PAYMENT_PROVIDER_AMOUNT_MISMATCH");
+    }
+    if (payment.provider && String(payment.provider).toUpperCase() !== provider.toUpperCase()) throw new Error("PAYMENT_PROVIDER_MISMATCH");
+    if (payment.status !== "PENDING" && payment.status !== "COMPLETED") throw new Error("PAYMENT_PROVIDER_CONFIRMATION_INVALID_STATUS");
+
+    const updated = await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        provider,
+        providerReference: reference,
+        providerEventId: eventId,
+        providerVerifiedAt: new Date(),
+        status: "COMPLETED",
+        paidAt: new Date(),
+        reconciliationStatus: "MATCHED",
+        reconciliationReference: reference,
+        reconciledAt: new Date(),
+      },
+    });
+    const existingJournal = await tx.journalEntry.findFirst({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, sourceType: "PAYMENT", sourceId: payment.id },
+    });
+    if (!existingJournal && (updated.customerId || updated.supplierId)) {
+      const lookup = await this.accounts(tx, ctx);
+      const built = updated.customerId
+        ? FinancialBridge.mapCustomerPaymentToJournal(ctx, updated as any, lookup as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1)
+        : FinancialBridge.mapSupplierPaymentToJournal(ctx, updated as any, lookup as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+      await this.writeJournal(tx, ctx, built);
+    }
+    await tx.auditEvent.create({
+      data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "payment-sync", action: "PAYMENT_PROVIDER_CONFIRMED", entityType: "Payment", entityId: payment.id,
+        metadata: { provider, providerEventId: eventId, providerReference: reference, amount: Number(payment.amount) },
+      },
+    });
+    return updated;
   }
 
   async createSale(ctx: TenantContext, req: any) {
@@ -250,6 +482,85 @@ export class PrismaAtomicCommercialFinanceService {
           throw new Error(`${code}: Cannot backdate sale into accounting period "${closedPeriod.name}".`);
         }
       }
+      // Reserve and validate all physical stock components before payment processing or sale creation.
+      // Row locks are ordered by variant ID to keep concurrent multi-item sales from deadlocking.
+      const requestedByVariant = new Map<string, { productId: string; quantity: number }>();
+      for (const item of req.items) {
+        const itemQuantity = Number(item.quantity);
+        if (!Number.isFinite(itemQuantity) || itemQuantity <= 0) throw new Error("SALE_QUANTITY_INVALID");
+        const resolution = bundleResolutions.get(item.variantId);
+        const components = resolution?.isBundle
+          ? resolution.components.map((component) => ({
+              variantId: String(component.variantId),
+              productId: String(component.productId),
+              quantity: Number(component.quantity) * itemQuantity,
+            }))
+          : [{
+              variantId: String(item.variantId),
+              productId: String(item.productId ?? variantProductIds.get(item.variantId)),
+              quantity: itemQuantity,
+            }];
+
+        for (const component of components) {
+          if (!Number.isFinite(component.quantity) || component.quantity <= 0 || !component.productId || component.productId === "undefined") {
+            throw new Error("SALE_STOCK_COMPONENT_INVALID");
+          }
+          const existingRequirement = requestedByVariant.get(component.variantId);
+          if (existingRequirement && existingRequirement.productId !== component.productId) {
+            throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+          }
+          requestedByVariant.set(component.variantId, {
+            productId: component.productId,
+            quantity: (existingRequirement?.quantity ?? 0) + component.quantity,
+          });
+        }
+      }
+
+      for (const [variantId, requirement] of [...requestedByVariant.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+        if (typeof tx.$queryRawUnsafe === "function") {
+          const lockRows = await tx.$queryRawUnsafe(
+            `SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
+            variantId,
+            ctx.tenantId,
+            ctx.branchId,
+          ) as Array<{ id: string }>;
+          if (!Array.isArray(lockRows) || lockRows.length === 0) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+        }
+
+        const lockedVariant = await tx.productVariant.findUnique({ where: { id: variantId } });
+        if (
+          !lockedVariant ||
+          lockedVariant.tenantId !== ctx.tenantId ||
+          lockedVariant.branchId !== ctx.branchId ||
+          lockedVariant.productId !== requirement.productId ||
+          lockedVariant.isActive === false
+        ) {
+          throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+        }
+
+        const ledgerRows = await tx.stockLedger.findMany({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId },
+          orderBy: { occurredAt: "asc" },
+        });
+        const currentStock = calculateAvailableStock(ledgerRows as any);
+        if (!Number.isFinite(currentStock) || currentStock < 0) {
+          throw new Error("INSUFFICIENT_STOCK: stock ledger invariant violated");
+        }
+
+        if (isBackdated) {
+          const historicalRows = ledgerRows.filter((row: any) => new Date(row.occurredAt || row.createdAt).getTime() < occurredAt.getTime());
+          const historicalStock = calculateAvailableStock(historicalRows as any);
+          if (historicalStock < requirement.quantity) {
+            throw new Error(`INSUFFICIENT_STOCK: requested ${requirement.quantity}, only ${historicalStock} available at the backdated sale time`);
+          }
+          const validation = validateRetroactiveTimeline(ledgerRows as any, occurredAt, -requirement.quantity);
+          if (!validation.valid) {
+            throw new Error(`INSUFFICIENT_STOCK: Backdated sale would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`);
+          }
+        } else {
+          // Forward/offline sales may oversell, but the ledger and conflict audit below must record the shortfall.
+        }
+      }
       const saleNumber = `SAL-${occurredAt.toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const payments: any[] = [];
       for (const p of req.payments || []) {
@@ -274,8 +585,24 @@ export class PrismaAtomicCommercialFinanceService {
           customerCurrentBalance,
         });
         if (!r.success) throw new Error(r.error || "PAYMENT_REJECTED");
-        payments.push({ id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider ?? null, providerReference: r.reference, status: "COMPLETED", paidAt: occurredAt }); }
+        payments.push({
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${randomUUID().slice(0, 8).toUpperCase()}`,
+          amount: p.amount,
+          paymentMethod: p.paymentMethod,
+          provider: p.provider ?? null,
+          providerReference: r.reference,
+          providerVerifiedAt: p.paymentMethod === "CASH" || p.providerReference ? new Date() : null,
+          reconciliationStatus: p.paymentMethod === "CASH" || p.providerReference ? "MATCHED" : "UNRECONCILED",
+          reconciliationReference: p.providerReference ?? null,
+          status: "COMPLETED",
+          paidAt: occurredAt,
+        });
+      }
       const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      if (totalPaid > Number(totals.grandTotal) + 0.005) throw new Error("PAYMENT_OVERPAYMENT");
       if (totalPaid + 0.005 < totals.grandTotal) throw new Error("PAYMENT_UNDERPAYMENT");
       if (payments.some((p) => p.paymentMethod === "CASH")) {
         if (!req.cashSessionId) throw new Error("CASH_SESSION_REQUIRED");
@@ -480,8 +807,13 @@ export class PrismaAtomicCommercialFinanceService {
       }
 
       const lookup = await this.accounts(tx, ctx);
-      const tender = payments[0]?.paymentMethod === "BANK" ? "BANK" : payments[0]?.paymentMethod === "CREDIT" ? "CREDIT" : payments[0]?.paymentMethod === "MOBILE_MONEY" ? "MOBILE_MONEY" : "CASH";
-      const built = FinancialBridge.mapSaleToJournal(ctx, sale as any, lookup as any, tender as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+      const built = FinancialBridge.mapSaleToJournal(
+        ctx,
+        sale as any,
+        lookup as any,
+        (sale.payments || payments) as any,
+        (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1,
+      );
       await this.writeJournal(tx, ctx, built);
       if (typeof tx.$executeRawUnsafe === "function") {
         await tx.$executeRawUnsafe(
@@ -953,7 +1285,7 @@ export class PrismaAtomicCommercialFinanceService {
         const built = {
           journal: {
             id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
-            journalNumber: TransactionNumbering.formatNumber("JRN", "MAIN", (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1),
+            journalNumber: `JRN-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${randomUUID().slice(0, 8).toUpperCase()}`,
             entryDate: now.toISOString(), postingDate: now.toISOString(), sourceType: "REVERSAL", sourceId: id,
             description: `Void Expense: ${expense.category}`, currency: "TZS", exchangeRate: 1,
             totalDebit: Number(original.totalCredit), totalCredit: Number(original.totalDebit),

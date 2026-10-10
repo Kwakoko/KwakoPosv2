@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeftRight, CheckCircle2, ClipboardList, RefreshCw, 
 import { useBranch, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { useToast } from "../context/ToastContext.js";
 import { safeUUID } from "../services/applicationApiService.js";
-import { queueStockAdjustment, buildStockBalanceProjection } from "../services/inventoryStockService.js";
+import { buildStockBalanceProjection, queueStockAdjustment } from "../services/inventoryStockService.js";
 import { getOrCreatePersistentDeviceId } from "../services/deviceIdentity.js";
 import { commitLocalOutbox, commitLocalOutboxes } from "../persistence/commitLocalMutation.js";
 
@@ -39,29 +39,27 @@ export const InventoryOperationalWorkspace: React.FC<Props> = ({ mode }) => {
     if (!hasPermission("inventory.adjust") && !hasPermission("inventory.transfer") && !hasPermission("stock.manage")) throw new Error("INVENTORY_PERMISSION_REQUIRED");
   };
 
-  const recordLedgerMovement = async (v:any, delta:number, movementType:string, refType:string, refId:string, note:string) => {
+  const queueInventoryOperation = async (
+    entityType: "StockTransfer" | "StockCount" | "WastageRecord",
+    entityId: string,
+    operationType: "CREATE" | "UPDATE",
+    payload: Record<string, unknown>,
+    idempotencyKey: string,
+    clientCreatedAt = new Date().toISOString(),
+  ) => {
     if (!currentTenantId || !currentBranchId) throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED");
-    const before = Number(projection.byVariant.get(v.id) || 0);
-    const after = before + delta;
-    if (after < 0) throw new Error("INSUFFICIENT_STOCK");
-    const now = new Date().toISOString();
-    const operationId = `inventory-${refType.toLowerCase()}-${refId}-${v.id}`;
-    const idempotencyKey = `INV-${refType}-${refId}-${v.id}-${delta}`;
-    if ([...db.stockLedger.values()].some((l:any) => l.tenantId === currentTenantId && l.branchId === currentBranchId && l.idempotencyKey === idempotencyKey)) return;
-    const ledger:any = {
-      id: safeUUID(), tenantId: currentTenantId, branchId: currentBranchId, productId: v.productId, variantId: v.id,
-      movementType, referenceType: refType, referenceId: refId, quantityBefore: before, quantityChange: delta,
-      quantity: delta, quantityAfter: after, unitCost: Number(v.costPrice || v.price || 0), totalCost: Math.abs(delta) * Number(v.costPrice || v.price || 0),
-      deviceId: await getOrCreatePersistentDeviceId(), operationId, idempotencyKey, notes: note, synced: false, occurredAt: now, createdAt: now
-    };
-    await db.executeAtomicMutation({
-      writes: [{ store: "stockLedger", key: ledger.id, value: ledger }],
-      outboxItem: {
-        id: operationId, entityType: "StockLedger", entityId: ledger.id, operationType: "CREATE", payload: ledger,
-        clientCreatedAt: now, idempotencyKey, status: "PENDING", tenantId: currentTenantId, branchId: currentBranchId
-      },
-      tenantContext: { tenantId: currentTenantId, branchId: currentBranchId }
-    });
+    await commitLocalOutboxes(db, [{
+      id: `inventory-${entityType.toLowerCase()}-${entityId}-${idempotencyKey}`,
+      entityType,
+      entityId,
+      operationType,
+      payload,
+      clientCreatedAt,
+      idempotencyKey,
+      status: "PENDING",
+      tenantId: currentTenantId,
+      branchId: currentBranchId,
+    }], { tenantId: currentTenantId, branchId: currentBranchId });
   };
 
   const doTransferRelease = async () => {

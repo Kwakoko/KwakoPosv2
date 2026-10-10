@@ -819,11 +819,16 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
         });
         void apiRecordSessionEvent("SESSION_RESTORED", { source: "session-validate" });
       })
-      .catch(async () => {
-        if (alive && navigator.onLine) await terminateSession("SESSION_TIMEOUT", true, true);
+      .catch(async (err: any) => {
+        if (!alive || !navigator.onLine) return;
+        const status = Number(err?.status || err?.statusCode || 0);
+        const code = String(err?.code || "");
+        if (status === 401 || status === 403 || code === "SESSION_EXPIRED" || code === "SESSION_REVOKED" || code === "AUTH_REQUIRED") {
+          await terminateSession("SESSION_TIMEOUT", true, true);
+        }
       });
     return () => { alive = false; };
-  }, [user, isOnline, sessionExpiresAt, sessionPolicy.absoluteTimeoutMs, sessionPolicy.offlineGracePeriodMs, terminateSession]);
+  }, [user?.id, isOnline, sessionPolicy.absoluteTimeoutMs, sessionPolicy.offlineGracePeriodMs, terminateSession]);
 
   useEffect(() => {
     if (!user) return;

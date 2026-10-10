@@ -100,6 +100,22 @@ describe("Retail Industry Module Operating System Test Suite", () => {
     const invalidRes = engine.validateSaleReturn(mockSale, [{ variantId: "v1", quantityReturned: 5, refundUnitPrice: 50000 }], settings);
     expect(invalidRes.valid).toBe(false);
     expect(invalidRes.error).toContain("exceeds original sold quantity");
+
+    // Cumulative quantities in a single request must not bypass the per-line limit.
+    const duplicatedVariantLines = engine.validateSaleReturn(
+      mockSale,
+      [
+        { variantId: "v1", quantityReturned: 1.25, refundUnitPrice: 50000 },
+        { variantId: "v1", quantityReturned: 1.25, refundUnitPrice: 50000 },
+      ],
+      settings,
+    );
+    expect(duplicatedVariantLines.valid).toBe(false);
+    expect(duplicatedVariantLines.error).toContain("exceeds original sold quantity");
+
+    expect(engine.validateSaleReturn(mockSale, [
+      { variantId: "v1", quantityReturned: Number.NaN, refundUnitPrice: 100 },
+    ], settings).valid).toBe(false);
   });
 
   it("should reconcile till session cash variances accurately", () => {

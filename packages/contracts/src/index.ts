@@ -882,7 +882,36 @@ export const PaymentProviderEnum = z.enum([
   "CASH",
   "OTHER",
 ]);
-export type PaymentProvider = z.infer<typeof PaymentProviderEnum>;
+export type PaymentProvider = z.infer<typeof PaymentProviderEnum>;export const RefundPaymentRequestSchema = z.object({
+  amount: z.number().positive(),
+  reason: z.string().trim().min(1),
+  refundMethod: PaymentMethodEnum.default("CASH"),
+  provider: PaymentProviderEnum.optional(),
+  providerReference: z.string().optional(),
+  idempotencyKey: z.string().min(1),
+});
+export type RefundPaymentRequest = z.infer<typeof RefundPaymentRequestSchema>;
+
+export const ReversePaymentRequestSchema = z.object({
+  reason: z.string().trim().min(1),
+  idempotencyKey: z.string().min(1),
+});
+export type ReversePaymentRequest = z.infer<typeof ReversePaymentRequestSchema>;
+
+export const PaymentReconciliationEntrySchema = z.object({
+  paymentId: z.string().uuid().optional(),
+  providerReference: z.string().optional(),
+  amount: z.number().nonnegative(),
+  paymentMethod: PaymentMethodEnum,
+  provider: PaymentProviderEnum.optional(),
+  externalReference: z.string().min(1),
+});
+export const PaymentReconciliationRequestSchema = z.object({
+  from: z.string().datetime(),
+  to: z.string().datetime(),
+  entries: z.array(PaymentReconciliationEntrySchema),
+});
+export type PaymentReconciliationRequest = z.infer<typeof PaymentReconciliationRequestSchema>;
 
 export const SaleSchema = z.object({
   id: z.string().uuid(),

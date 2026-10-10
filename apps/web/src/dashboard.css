@@ -120,10 +120,13 @@
 .bg-amber-50 { background-color: #fffbeb; }
 
 /* Dark mode backgrounds */
-.dark .dark\:bg-darkbg, [data-theme='dark'] .dark\:bg-darkbg { background-color: #121212; }
-.dark .dark\:bg-darkbg\/30, [data-theme='dark'] .dark\:bg-darkbg\/30 { background-color: rgba(18, 18, 18, 0.3); }
-.dark .dark\:bg-darkbg\/50, [data-theme='dark'] .dark\:bg-darkbg\/50 { background-color: rgba(18, 18, 18, 0.5); }
-.dark .dark\:bg-darkbg-card, [data-theme='dark'] .dark\:bg-darkbg-card { background-color: var(--surface); }
+.dark .dark\:bg-darkbg, [data-theme='dark'] .dark\:bg-darkbg { background-color: #0f172a; }
+.dark .dark\:bg-darkbg\/30, [data-theme='dark'] .dark\:bg-darkbg\/30 { background-color: rgba(15, 23, 42, 0.3); }
+.dark .dark\:bg-darkbg\/50, [data-theme='dark'] .dark\:bg-darkbg\/50 { background-color: rgba(15, 23, 42, 0.5); }
+.dark .dark\:bg-darkbg-card, [data-theme='dark'] .dark\:bg-darkbg-card { background-color: #1e293b; }
+.bg-dashboard { background-color: #0f172a; }
+.bg-dashboard-card { background-color: #1e293b; }
+.border-dashboard-border { border-color: #243047; }
 .dark .dark\:bg-primary\/20, [data-theme='dark'] .dark\:bg-primary\/20 { background-color: rgba(15, 98, 254, 0.2); }
 .dark .dark\:bg-emerald-950\/30, [data-theme='dark'] .dark\:bg-emerald-950\/30 { background-color: rgba(6, 78, 59, 0.3); }
 .dark .dark\:bg-red-950\/30, [data-theme='dark'] .dark\:bg-red-950\/30 { background-color: rgba(69, 10, 10, 0.3); }

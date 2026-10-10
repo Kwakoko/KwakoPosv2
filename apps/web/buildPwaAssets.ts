@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { execFileSync } from "node:child_process";
 
 const dir = typeof __dirname !== "undefined"
   ? __dirname
@@ -29,12 +30,34 @@ if (!fs.existsSync(releaseManifestPath)) {
 
 const releaseManifest = JSON.parse(fs.readFileSync(releaseManifestPath, "utf8"));
 const version = String(releaseManifest.version || "2.13.0");
+function getCleanWorkspaceGitSha(): string {
+  try {
+    const sha = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (dirty) {
+      throw new Error("RELEASE_MANIFEST_INVALID: Git SHA fallback requires a clean worktree; commit the build inputs or provide an exact CI SHA.");
+    }
+    return sha;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("RELEASE_MANIFEST_INVALID:")) throw error;
+    return "";
+  }
+}
+
 const gitSha = String(
   releaseManifest.gitSha ||
   process.env.GITHUB_SHA ||
   process.env.COMMIT_SHA ||
   process.env.GIT_SHA ||
-  ""
+  getCleanWorkspaceGitSha()
 );
 if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error("RELEASE_MANIFEST_INVALID: exact Git SHA is required to build PWA assets.");
 const rawBuildNumber = releaseManifest.buildNumber || 584;

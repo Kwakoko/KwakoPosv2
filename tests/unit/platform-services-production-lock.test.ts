@@ -13,7 +13,7 @@ describe("Platform Services Production Lock v1", () => {
   });
 
   it("executes the fail-closed production lock successfully", () => {
-    execFileSync("npx", ["tsx", "scripts/certification/platform-services-production-lock.ts"], {
+    execFileSync(process.execPath, [path.resolve(process.cwd(), "node_modules/tsx/dist/cli.mjs"), "scripts/certification/platform-services-production-lock.ts"], {
       cwd: process.cwd(),
       stdio: "pipe",
     });

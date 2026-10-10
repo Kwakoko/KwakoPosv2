@@ -90,12 +90,20 @@ jobs:
         run: npm run certify:finance-lock
       - name: Receivables Audit Production Lock
         run: npm run certify:receivables-lock
+      - name: Receivables Finance Scope Audit
+        run: npm run certify:finance-receivables-lock
       - name: Accounts Payable Audit Production Lock
         run: npm run certify:payables-lock
+      - name: Payables Finance Scope Audit
+        run: npm run certify:finance-payables-lock
       - name: Expenses Production Lock
         run: npm run certify:expenses-lock
+      - name: Expenses Finance Scope Audit
+        run: npm run certify:finance-expenses-lock
       - name: Payments Audit Controls Production Lock
         run: npm run certify:payments-lock
+      - name: Payments Finance Scope Audit
+        run: npm run certify:finance-payments-lock
       - name: Backdated Inventory Production Lock
         run: npm run certify:backdated-lock
       - name: Offline Sync Platform Production Lock

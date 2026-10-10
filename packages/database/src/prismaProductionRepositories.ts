@@ -373,7 +373,10 @@ export class PrismaCommercialRepository {
     const paymentNumber = `PAY-SUP-${String(req.idempotencyKey).replace(/[^A-Za-z0-9]/g, "").slice(0, 24)}`;
     return normalize(await db.$transaction(async (tx: any) => {
       const existing = await tx.payment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber } });
-      if (existing) return existing;
+      if (existing) {
+        const existingRefundPayment = await tx.payment.findUnique({ where: { id: `refund:${existing.id}` } }).catch(() => null);
+        return { returnRecord: existing, refundPayment: existingRefundPayment };
+      }
       const payment = await tx.payment.create({ data: {
         id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber,
         purchaseReceiptId: req.purchaseReceiptId || null, supplierId: req.supplierId, amount: req.amount,
@@ -484,7 +487,10 @@ export class PrismaCommercialRepository {
         where: { id: returnId, ...tenantWhere(ctx) },
         include: { lines: true },
       });
-      if (existing) return existing;
+      if (existing) {
+        const existingRefundPayment = await tx.payment.findUnique({ where: { id: `refund:${existing.id}` } }).catch(() => null);
+        return { returnRecord: existing, refundPayment: existingRefundPayment };
+      }
 
       const items = Array.isArray(req.items) ? req.items : [];
       if (!items.length) throw new Error("RETURN_ITEMS_REQUIRED");
@@ -658,9 +664,9 @@ export class PrismaCommercialRepository {
       }
 
       const refundPaymentId = `refund:${record.id}`;
-      const refundPayment = await tx.payment.findUnique({ where: { id: refundPaymentId } }).catch(() => null);
+      let refundPayment = await tx.payment.findUnique({ where: { id: refundPaymentId } }).catch(() => null);
       if (!refundPayment) {
-        await tx.payment.create({
+        refundPayment = await tx.payment.create({
           data: {
             id: refundPaymentId,
             tenantId: ctx.tenantId,
@@ -673,11 +679,28 @@ export class PrismaCommercialRepository {
             provider: original.payments[0]?.provider || null,
             providerReference: null,
             status: "REFUNDED",
+            isRefund: true,
+            refundReturnId: record.id,
+            refundReason: record.reason,
+            reconciliationStatus: "MATCHED",
+            idempotencyKey: refundPaymentId,
             paidAt: new Date(),
           },
         });
+        await tx.auditEvent.create({
+          data: {
+            id: randomUUID(),
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            userId: ctx.userId,
+            deviceId: req.deviceId || "web",
+            action: "PAYMENT_REFUND_RECORDED",
+            entityType: "Payment",
+            entityId: refundPaymentId,
+            metadata: { returnId: record.id, originalSaleId: original.id, amount: total, refundType: record.refundType, reason: record.reason },
+          },
+        });
       }
-
       if (record.customerId && record.refundType === "STORE_CREDIT") {
         await tx.customer.update({
           where: { id: record.customerId },
@@ -747,7 +770,117 @@ export class PrismaCommercialRepository {
           },
         },
       });
-      return record;
+      return { returnRecord: record, refundPayment };
+    }));
+  }
+
+  async reversePayment(ctx: TenantContext, paymentId: string, req: any) {
+    return normalize(await this.atomic.reversePayment(ctx, paymentId, req.reason));
+  }
+
+  async refundPayment(ctx: TenantContext, paymentId: string, req: any) {
+    return normalize(await this.atomic.refundPayment(ctx, paymentId, req));
+  }
+
+  async confirmProviderPayment(ctx: TenantContext, paymentId: string, req: any) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      return this.atomic.confirmProviderPaymentInTransaction(ctx, paymentId, req, tx);
+    }));
+  }
+
+  async getPaymentChannelReport(ctx: TenantContext, from: Date, to: Date) {
+    const payments = await db.payment.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, paidAt: { gte: from, lt: to } },
+      orderBy: { paidAt: "asc" },
+    });
+    const channels: Record<string, { paymentMethod: string; provider: string; gross: number; refunds: number; reversed: number; net: number; count: number; refundCount: number }> = {};
+    for (const payment of payments as any[]) {
+      const key = `${String(payment.paymentMethod || "OTHER").toUpperCase()}:${String(payment.provider || "NONE").toUpperCase()}`;
+      channels[key] ||= { paymentMethod: String(payment.paymentMethod || "OTHER"), provider: String(payment.provider || "NONE"), gross: 0, refunds: 0, reversed: 0, net: 0, count: 0, refundCount: 0 };
+      const bucket = channels[key];
+      if (payment.isRefund || payment.status === "REFUNDED") {
+        bucket.refunds += Number(payment.amount);
+        bucket.refundCount += 1;
+      } else if (payment.status === "REVERSED") {
+        bucket.reversed += Number(payment.amount);
+      } else if (["COMPLETED", "PARTIALLY_REFUNDED"].includes(payment.status)) {
+        bucket.gross += Number(payment.amount);
+        bucket.count += 1;
+        bucket.net += Number(payment.amount) - Number(payment.refundedAmount || 0);
+      }
+    }
+    return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      period: { from: from.toISOString(), to: to.toISOString() },
+      channels: Object.values(channels).map((c) => ({ ...c, net: Math.round(c.net * 100) / 100 })),
+      totals: Object.values(channels).reduce((acc, c) => ({
+        gross: acc.gross + c.gross,
+        refunds: acc.refunds + c.refunds,
+        reversed: acc.reversed + c.reversed,
+        net: acc.net + c.net,
+        count: acc.count + c.count,
+        refundCount: acc.refundCount + c.refundCount,
+      }), { gross: 0, refunds: 0, reversed: 0, net: 0, count: 0, refundCount: 0 }),
+    };
+  }
+
+  async reconcilePayments(ctx: TenantContext, req: any) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const from = new Date(req.from);
+      const to = new Date(req.to);
+      if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error("PAYMENT_RECONCILIATION_PERIOD_INVALID");
+      const payments = await tx.payment.findMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, paidAt: { gte: from, lt: to }, isRefund: false, status: { in: ["COMPLETED", "PARTIALLY_REFUNDED"] } },
+      });
+      const used = new Set<string>();
+      const matched: any[] = [];
+      const unmatchedExternal: any[] = [];
+
+      for (const entry of req.entries) {
+        const candidates = payments.filter((p: any) =>
+          !used.has(p.id) &&
+          (entry.paymentId ? p.id === entry.paymentId : entry.providerReference ? p.providerReference === entry.providerReference : true) &&
+          Math.abs(Number(p.amount) - Number(entry.amount)) <= 0.01 &&
+          p.paymentMethod === entry.paymentMethod &&
+          (!entry.provider || p.provider === entry.provider)
+        );
+        if (candidates.length !== 1) {
+          unmatchedExternal.push(entry);
+          continue;
+        }
+        const payment = candidates[0];
+        used.add(payment.id);
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            reconciliationStatus: "MATCHED",
+            reconciliationReference: entry.externalReference,
+            reconciledAt: new Date(),
+          },
+        });
+        matched.push({ paymentId: payment.id, externalReference: entry.externalReference, amount: Number(entry.amount) });
+      }
+
+      const unmatchedInternal = [];
+      for (const payment of payments) {
+        if (!used.has(payment.id)) {
+          await tx.payment.update({
+            where: { id: payment.id },
+            data: { reconciliationStatus: "VARIANCE", reconciliationReference: req.reference || null, reconciledAt: new Date() },
+          });
+          unmatchedInternal.push({ paymentId: payment.id, amount: Number(payment.amount), paymentMethod: payment.paymentMethod, provider: payment.provider, providerReference: payment.providerReference });
+        }
+      }
+
+      const event = await tx.auditEvent.create({
+        data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: "payment-reconciliation",
+          action: "PAYMENT_RECONCILIATION_COMPLETED", entityType: "Payment", entityId: ctx.branchId,
+          metadata: { from: req.from, to: req.to, matchedCount: matched.length, externalUnmatchedCount: unmatchedExternal.length, internalUnmatchedCount: unmatchedInternal.length },
+        },
+      });
+      return { matched, unmatchedExternal, unmatchedInternal, auditEventId: event.id, reconciled: unmatchedExternal.length === 0 && unmatchedInternal.length === 0 };
     }));
   }
 

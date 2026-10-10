@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { runSuperAdminPlatformCertification } from "../../scripts/certification/super-admin-platform-certification-engine.js";
 
@@ -10,7 +11,7 @@ describe("Super Admin Production Lock", () => {
   });
 
   it("contains an independent fail-closed lock contract", () => {
-    execFileSync("npx", ["tsx", "scripts/certification/super-admin-production-lock.ts"], { stdio: "pipe" });
+    execFileSync(process.execPath, [path.resolve(process.cwd(), "node_modules/tsx/dist/cli.mjs"), "scripts/certification/super-admin-production-lock.ts"], { stdio: "pipe" });
   });
   it("protects the platform Super Admin role from tenant RBAC and provisioning permission escalation", async () => {
     const fs = await import("node:fs");

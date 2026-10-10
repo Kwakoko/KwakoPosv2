@@ -85,6 +85,8 @@ model Tenant {
   traVfdOutbox           TraVfdOutbox[]
 
   devices                Device[]
+  dashboardReadModels DashboardReadModel[]
+
   @@map("tenants")
 }
 
@@ -138,6 +140,7 @@ model Branch {
   workforceSchedules   WorkforceSchedule[]
   attendanceRecords    AttendanceRecord[]
   timesheets           Timesheet[]
+  dashboardReadModels    DashboardReadModel[]
   leaveRequests        LeaveRequest[]
   workforceTasks       WorkforceTask[]
   workOrders           WorkOrder[]
@@ -289,11 +292,11 @@ model Notification {
   branch            Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
   recipientUser     User      @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
 
+  @@unique([tenantId, recipientUserId, dedupeKey])
   @@index([tenantId, recipientUserId, readAt, createdAt])
   @@index([tenantId, branchId, createdAt])
   @@index([tenantId, status, nextRetryAt])
   @@index([tenantId, category, createdAt])
-  @@unique([tenantId, recipientUserId, dedupeKey])
   @@map("notifications")
 }
 
@@ -837,7 +840,7 @@ model Payment {
   paymentMethod     String           @default("CASH") // CASH, CARD, BANK, MOBILE_MONEY, CREDIT, OTHER
   provider          String? // MPESA, AIRTEL_MONEY, TIGO_PESA, HALOPESA, NMB, CRDB, CASH
   providerReference String?
-  idempotencyKey String? @unique
+  idempotencyKey String?
   providerEventId String?
   providerVerifiedAt DateTime?
   reconciliationStatus String @default("UNRECONCILED")
@@ -865,14 +868,15 @@ model Payment {
   customer          Customer?        @relation(fields: [customerId], references: [id])
   supplier          Supplier?        @relation(fields: [supplierId], references: [id])
 
-  @@unique([tenantId, branchId, paymentNumber])
-  @@index([tenantId, branchId, paidAt])
-  @@index([tenantId, branchId, reconciliationStatus, paidAt])
-  @@index([tenantId, branchId, providerEventId])
   drawerOperationId String? @unique
   drawerOperation DrawerOperation? @relation("PaymentDrawerOperation", fields: [drawerOperationId], references: [id], onDelete: SetNull)
   drawerOperationByPaymentId DrawerOperation? @relation("DrawerOperationPayment")
 
+  @@unique([tenantId, branchId, paymentNumber])
+  @@index([tenantId, branchId, paidAt])
+  @@index([tenantId, branchId, reconciliationStatus, paidAt])
+  @@index([tenantId, branchId, providerEventId])
+  @@unique([tenantId, branchId, idempotencyKey])
   @@map("payments")
 }
 
@@ -961,10 +965,9 @@ model DrawerOperation {
   updatedAt     DateTime  @updatedAt
   payment       Payment?  @relation("PaymentDrawerOperation")
   paymentByPaymentId Payment? @relation("DrawerOperationPayment", fields: [paymentId], references: [id], onDelete: SetNull)
-
-  @@unique([paymentId])
   cashSession   CashSession? @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
 
+  @@unique([paymentId])
   @@index([tenantId, branchId, status, requestedAt])
   @@index([tenantId, branchId, operationType, createdAt])
   @@index([tenantId, branchId, cashSessionId])
@@ -1039,6 +1042,7 @@ model PriceListItem {
   effectiveTo  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
   @@index([tenantId, branchId, priceListId, variantId, isActive, effectiveFrom])
   @@index([tenantId, branchId, variantId, isActive, effectiveFrom])
   @@map("price_list_items")
@@ -1058,6 +1062,7 @@ model CustomerPrice {
   effectiveTo   DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
   @@index([tenantId, branchId, customerId, variantId, isActive, effectiveFrom])
   @@map("customer_prices")
 }
@@ -1079,6 +1084,7 @@ model PricingTier {
   effectiveTo     DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
   @@index([tenantId, branchId, variantId, kind, isActive, effectiveFrom])
   @@index([tenantId, branchId, kind, customerSegment, isActive, effectiveFrom])
   @@map("pricing_tiers")
@@ -1103,6 +1109,7 @@ model PricingPromotion {
   createdById        String
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
   @@index([tenantId, branchId, variantId, isActive, startAt, endAt, priority])
   @@map("pricing_promotions")
 }
@@ -1148,7 +1155,6 @@ model SyncOperation {
   @@index([tenantId, branchId, createdAt])
   @@map("sync_operations")
 }
-
 
 model RollbackRequest {
   id                      String                 @id
@@ -1446,6 +1452,8 @@ model AccountingPeriod {
   @@map("accounting_periods")
 }
 
+
+
 model JournalEntry {
   id                  String            @id @default(uuid())
   tenantId            String
@@ -1479,8 +1487,10 @@ model JournalEntry {
   @@unique([tenantId, branchId, journalNumber])
   @@index([tenantId, branchId, entryDate])
   @@index([sourceType, sourceId])
+  @@unique([tenantId, branchId, idempotencyKey])
   @@map("journal_entries")
 }
+
 
 model JournalLine {
   id             String       @id @default(uuid())
@@ -2573,7 +2583,7 @@ model TelecomWorkOrderRecord {
   checklistVersion   Int       @default(1)
   checklistItems     Json      @default("[]")
   completionNotes    String?
-  idempotencyKey     String?   @unique
+  idempotencyKey     String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -3612,6 +3622,9 @@ model DashboardReadModel {
   snapshot        Json
   capturedAt      DateTime @default(now()) @db.Timestamp(3)
   updatedAt       DateTime @default(now()) @updatedAt @db.Timestamp(3)
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
   @@unique([tenantId, branchId, timeframe])
   @@index([tenantId, branchId, asOfRevision])
   @@map("dashboard_read_models")

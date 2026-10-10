@@ -138,29 +138,30 @@ interface KPICardProps {
 const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, trend, trendLabel, onClick, action }) => (
   <div
     onClick={onClick}
-    className={`relative overflow-hidden rounded-2xl bg-white dark:bg-darkbg-card border border-slate-100 dark:border-darkbg-border p-5 shadow-sm transition-all duration-200 ${onClick ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
+    className={`relative overflow-hidden rounded-2xl p-5 shadow-sm transition-all duration-200 border ${onClick ? 'cursor-pointer hover:shadow-lg hover:-translate-y-0.5' : ''}`}
+    style={{ background: '#1e293b', borderColor: '#243047' }}
   >
     {/* Decorative accent blob */}
-    <div className="absolute -top-4 -right-4 h-20 w-20 rounded-full opacity-10" style={{ background: accent }} />
+    <div className="absolute -top-4 -right-4 h-20 w-20 rounded-full opacity-10 pointer-events-none" style={{ background: accent }} />
 
-    <div className="flex items-start justify-between relative">
-      <div>
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">{title}</p>
-        <p className="mt-2 text-2xl font-black text-slate-900 dark:text-white leading-none">{value}</p>
+    <div className="flex items-start justify-between relative z-10 gap-4">
+      <div className="min-w-0">
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{title}</p>
+        <p className="mt-2 text-2xl font-black text-white leading-none">{value}</p>
         {trend && (
           <span className={`mt-1.5 inline-flex items-center gap-0.5 text-[10px] font-black rounded-full px-1.5 py-0.5 ${
-            trend === 'up' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'
+            trend === 'up' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
           }`}>
             {trend === 'up' ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
             {trendLabel || (trend === 'up' ? '+Today' : '−Today')}
           </span>
         )}
-        <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500 leading-tight">{desc}</p>
+        <p className="mt-2 text-[11px] text-slate-400 leading-tight">{desc}</p>
         {action && (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); action.onClick(); }}
-            className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors"
+            className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors cursor-pointer"
             style={{ background: `${accent}18`, color: accent }}
           >
             <RefreshCw className="h-3 w-3" />
@@ -168,8 +169,8 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, tre
           </button>
         )}
       </div>
-      <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0 shadow-sm" style={{ background: `${accent}18` }}>
-        <div style={{ color: accent }}>{icon}</div>
+      <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0 shadow-sm" style={{ background: `${accent}18`, color: accent }}>
+        {icon}
       </div>
     </div>
   </div>
@@ -213,7 +214,11 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
     ' font-black leading-none tracking-tight text-white';
 
   return (
-    <div onClick={onClick} className={cardClass}
+    <div
+      onClick={onClick}
+      className={`relative overflow-hidden rounded-2xl p-5 shadow-sm transition-all duration-200 border ${
+        onClick ? 'cursor-pointer hover:shadow-lg hover:-translate-y-0.5' : ''
+      }`}
       style={{
         background: 'linear-gradient(135deg, ' + accent + '12 0%, rgba(5, 18, 38, 0.96) 72%)',
         borderColor: accent + 'cc',
@@ -236,10 +241,15 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
           <p className={valueClass}>{value}</p>
           <p className="mt-3 max-w-[90%] text-[11px] leading-relaxed text-slate-300/90">{description}</p>
           {action && (
-            <button type="button"
-              onClick={(e) => { e.stopPropagation(); action.onClick(); }}
-              className="mt-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold"
-              style={{ background: accent + '18', color: accent }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                action.onClick();
+              }}
+              className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors cursor-pointer"
+              style={{ background: `${accent}18`, color: accent }}
+            >
               <RefreshCw className="h-3 w-3" />
               {action.label}
             </button>
@@ -1477,7 +1487,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const hasToday = orders.some(o => o.timestamp >= new Date().setHours(0,0,0,0));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-h-full bg-[#0f172a] text-slate-100">
       {/* Standalone SVG Injection Strategy: Global gradient definitions */}
       <svg style={{ height: 0, width: 0, position: 'absolute', opacity: 0 }} aria-hidden="true">
         <defs>
