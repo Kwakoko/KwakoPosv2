@@ -11,7 +11,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/api/src/services/retailService.ts": "bc10724f4d20f575d4ad302e756e57d234fa1fde",
   "apps/api/src/services/retailAuthorization.ts": "6cfdb250467e19be381eafc69dd51befeafde178",
   "apps/api/src/server.ts": "aef442415a28d84397ca5e34fc8988157c48da63",
-  "packages/domain/src/retailEngine.ts": "6d40f6422aa7e274d8245c37e962d7ebc7dbb077",
+  "packages/domain/src/retailEngine.ts": "8f96c19d20f2a5834eaa6a5c78577f6b79f9c7ed",
   "packages/database/prisma/schema.prisma": "131cf914169681bdfb33f1dfeea2097e058b4042",
   "packages/database/prisma/migrations/202610100001_retail_promotion_source/migration.sql": "55df731e9512c9b93874f91a2fe4992c2dd19c31",
   "packages/database/prisma/migrations/202610100002_variant_barcode_uniqueness/migration.sql": "48514dd6b68f30475c4da73cb26604e285a5ebf3",
