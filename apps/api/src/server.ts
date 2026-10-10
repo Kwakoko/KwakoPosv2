@@ -5004,7 +5004,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       minOrderAmount: z.number().finite().nonnegative().optional(),
       startDate: z.coerce.date(),
       endDate: z.coerce.date(),
-      isActive: z.boolean().optional(),
+      isActive: z.boolean().default(true),
       requiredRoleToApply: z.string().trim().min(1).max(100).optional(),
     }).strict().parse(req.body || {});
     const { globalRetailService } = await import("./services/retailService.js");
