@@ -936,6 +936,7 @@ export const CreatePosSaleRequestSchema = z.object({
     })
   ).min(1),
   discountTotal: z.number().nonnegative().optional(),
+  loyaltyPointsRedeemed: z.number().int().positive().optional(),
   taxTotal: z.number().nonnegative().optional(),
   payments: z.array(
     z.object({

@@ -507,6 +507,7 @@ export function evaluateFeatureFlag(
 
 export * from "./commercialInvariants.js";
 export * from "./pricingTaxEngine.js";
+export * from "./retailPromotionEngine.js";
 export * from "./paymentEngine.js";
 export * from "./cashSessionEngine.js";
 export * from "./transactionNumbering.js";

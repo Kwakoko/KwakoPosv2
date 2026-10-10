@@ -2922,6 +2922,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (!refundAuthority) throw new Error("FORBIDDEN: PAYMENT_REFUND required for financial return");
     const validated = CreateSaleReturnRequestSchema.parse(req.body);
     const result = await commercialRepository.createSaleReturn(ctx, validated);
+    const returnId = String((result as any)?.returnRecord?.id || (result as any)?.id || "");
+    if (returnId) {
+      const { globalRetailParityService } = await import("./services/retailParityService.js");
+      await globalRetailParityService.reversePointsForReturn(ctx, returnId);
+    }
     return reply.status(201).send({ success: true, data: result });
   });
 
@@ -4996,11 +5001,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     );
     const body = z.object({
       branchId: z.string().uuid().optional(),
+      variantId: z.string().uuid().optional(),
+      rewardVariantId: z.string().uuid().optional(),
       name: z.string().trim().min(1).max(160),
       type: z.enum(["PERCENTAGE_DISCOUNT", "FIXED_AMOUNT_DISCOUNT", "BUY_X_GET_Y", "QUANTITY_VOLUME_DISCOUNT"]),
       discountValue: z.number().finite().nonnegative(),
       buyQuantity: z.number().finite().positive().optional(),
       getQuantity: z.number().finite().positive().optional(),
+      minQuantity: z.number().finite().positive().optional(),
       minOrderAmount: z.number().finite().nonnegative().optional(),
       startDate: z.coerce.date(),
       endDate: z.coerce.date(),
@@ -5010,6 +5018,80 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalRetailService } = await import("./services/retailService.js");
     const created = await globalRetailService.createPromotion(ctx, body);
     return reply.status(201).send({ success: true, data: created });
+  });
+
+  // Durable loyalty ledger and exchange workflows. Each service operation is tenant+branch scoped.
+  server.get("/api/v1/retail/loyalty/program", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "loyalty.view", "loyalty.manage", "customers.view", "customer.view");
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    return reply.send({ success: true, data: await globalRetailParityService.getLoyaltyProgram(ctx) });
+  });
+
+  server.put("/api/v1/retail/loyalty/program", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "loyalty.manage", "customers.manage");
+    const body = z.object({
+      currencyUnitsPerPoint: z.number().finite().positive().max(1_000_000_000),
+      currencyValuePerPoint: z.number().finite().positive().max(1_000_000),
+      maxRedemptionPct: z.number().finite().min(0).max(100),
+      isActive: z.boolean().optional(),
+    }).strict().parse(req.body || {});
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    return reply.send({ success: true, data: await globalRetailParityService.saveLoyaltyProgram(ctx, body) });
+  });
+
+  server.get("/api/v1/retail/customers/:customerId/loyalty", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "loyalty.view", "loyalty.manage", "customers.view", "customer.view", "customers.manage");
+    const customerId = z.string().uuid().parse((req.params as any).customerId);
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    const [balance, ledger] = await Promise.all([
+      globalRetailParityService.getLoyaltyBalance(ctx, customerId),
+      globalRetailParityService.listLoyaltyLedger(ctx, customerId),
+    ]);
+    return reply.send({ success: true, data: { ...balance, ledger } });
+  });
+
+  server.post("/api/v1/retail/loyalty/adjust", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "loyalty.manage", "customers.manage");
+    const body = z.object({
+      customerId: z.string().uuid(),
+      pointsDelta: z.number().int().refine((value) => value !== 0),
+      idempotencyKey: z.string().trim().min(1).max(200),
+      reason: z.string().trim().min(3).max(500),
+    }).strict().parse(req.body || {});
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    return reply.status(201).send({ success: true, data: await globalRetailParityService.adjustLoyaltyPoints(ctx, body) });
+  });
+
+  server.post("/api/v1/retail/loyalty/redeem", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "loyalty.redeem", "loyalty.manage", "sales.create");
+    const body = z.object({
+      customerId: z.string().uuid(),
+      points: z.number().int().positive(),
+      basketAmount: z.number().finite().positive(),
+      idempotencyKey: z.string().trim().min(1).max(200),
+      reason: z.string().trim().min(3).max(500).optional(),
+      referenceType: z.string().trim().min(1).max(80).optional(),
+      referenceId: z.string().trim().min(1).max(200).optional(),
+    }).strict().parse(req.body || {});
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    return reply.status(201).send({ success: true, data: await globalRetailParityService.redeemLoyaltyPoints(ctx, body) });
+  });
+
+  server.get("/api/v1/retail/exchanges", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "view");
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    return reply.send({ success: true, data: await globalRetailParityService.listExchanges(ctx) });
+  });
+
+  server.post("/api/v1/retail/exchanges", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "return");
+    const body = z.object({
+      returnId: z.string().uuid(),
+      replacementSaleId: z.string().uuid(),
+      idempotencyKey: z.string().trim().min(1).max(200),
+    }).strict().parse(req.body || {});
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    return reply.status(201).send({ success: true, data: await globalRetailParityService.createExchange(ctx, body) });
   });
 
   server.post("/api/v1/retail/settings", async (req, reply) => {
@@ -5154,11 +5236,15 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
         roles.some((r: string) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN","MANAGER","BRANCH_MANAGER"].includes(r));
       if (!allowed) throw new Error("DISCOUNT_MANAGE_REQUIRED");
     }
+
+    if (Number((validated as any).loyaltyPointsRedeemed || 0) > 0) {
+      requireCommercialPermission(req, "loyalty.redeem", "loyalty.manage");
+    }
     const result = atomicCommercialFinance
       ? await atomicCommercialFinance.createSale(ctx, validated)
       : await commercialRepository.createPosSale(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
-  });;
+  });
 
   server.get("/api/v1/retail/replenishment", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
@@ -5536,6 +5622,63 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
   // =========================================================================
   // WHOLESALE & DISTRIBUTION ENDPOINTS
   // =========================================================================
+
+  // Persisted multi-channel commerce order intake and fulfillment.
+  server.get("/api/v1/omnichannel/orders", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "omnichannel.view", "omnichannel.manage", "orders.view", "sales.view", "sales.read");
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    return reply.send({ success: true, data: await globalRetailParityService.listOmnichannelOrders(ctx) });
+  });
+
+  server.post("/api/v1/omnichannel/orders", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "omnichannel.manage", "orders.manage", "sales.create");
+    const body = z.object({
+      orderNumber: z.string().trim().min(1).max(100).optional(),
+      channel: z.enum(["WEBSTORE", "MARKETPLACE", "PHONE", "SOCIAL"]),
+      externalOrderId: z.string().trim().min(1).max(200).optional(),
+      idempotencyKey: z.string().trim().min(1).max(200),
+      customerId: z.string().uuid().optional(),
+      fulfillmentType: z.enum(["PICKUP", "DELIVERY", "SHIP"]),
+      trackingReference: z.string().trim().min(1).max(200).optional(),
+      items: z.array(z.object({
+        variantId: z.string().uuid(),
+        quantity: z.number().finite().positive(),
+        unitPrice: z.number().finite().nonnegative(),
+        externalLineId: z.string().trim().min(1).max(200).optional(),
+      }).strict()).min(1).max(500),
+    }).strict().parse(req.body || {});
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    return reply.status(201).send({ success: true, data: await globalRetailParityService.createOmnichannelOrder(ctx, body) });
+  });
+
+  server.post("/api/v1/omnichannel/orders/:id/payments", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "payments.reconcile", "payments.manage");
+    const params = z.object({ id: z.string().uuid() }).parse(req.params || {});
+    const body = z.object({
+      amount: z.number().finite().positive(),
+      paymentMethod: z.enum(["CASH", "CARD", "BANK", "MOBILE_MONEY", "OTHER"]),
+      provider: z.string().trim().min(1).max(80).optional(),
+      providerReference: z.string().trim().min(1).max(200).optional(),
+      idempotencyKey: z.string().trim().min(1).max(160),
+      reconciliationReference: z.string().trim().min(1).max(200),
+    }).strict().parse(req.body || {});
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    return reply.status(201).send({
+      success: true,
+      data: await globalRetailParityService.recordOmnichannelPayment(ctx, params.id, body),
+    });
+  });
+
+  server.post("/api/v1/omnichannel/orders/:id/fulfillment", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "omnichannel.manage", "orders.manage", "sales.fulfill");
+    const params = z.object({ id: z.string().uuid() }).parse(req.params || {});
+    const body = z.object({
+      action: z.enum(["CANCEL", "SHIP", "DELIVER", "PICKUP"]),
+      trackingReference: z.string().trim().min(1).max(200).optional(),
+    }).strict().parse(req.body || {});
+    const { globalRetailParityService } = await import("./services/retailParityService.js");
+    return reply.send({ success: true, data: await globalRetailParityService.transitionOmnichannelOrder(ctx, params.id, body) });
+  });
 
   server.get("/api/v1/wholesale/orders", async (req, reply) => {
     const { globalWholesaleService } = await import("./services/wholesaleService.js");

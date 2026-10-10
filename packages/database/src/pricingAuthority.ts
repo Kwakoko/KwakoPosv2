@@ -177,6 +177,7 @@ export class PricingAuthority {
         startAt: { lte: now },
         endAt: { gt: now },
         AND: [
+          { OR: [{ sourceModule: null }, { sourceModule: { not: "RETAIL" } }] },
           { OR: [{ variantId: null }, { variantId: variant.id }] },
           { OR: [{ minQuantity: null }, { minQuantity: { lte: input.quantity } }] },
           { OR: [{ minOrderAmount: null }, { minOrderAmount: { lte: (Number(variant.price) * input.quantity) } }] },
