@@ -71,6 +71,17 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(run(compatibilityKeywords)).toBe("provider=" + canonical);
   });
 
+  it("canonicalizes common cross-script homoglyphs in fixed resource keywords only", () => {
+    const cyrillicP = "\u0440rojects/123456789012/locations/global/workloadIdentityPools/1234-pool/providers/5provider";
+    expect(run(cyrillicP)).toBe("provider=" + canonical);
+    const cyrillicO = "pr\u043ejects/123456789012/locations/global/workloadIdentityPools/1234-pool/providers/5provider";
+    expect(run(cyrillicO)).toBe("provider=" + canonical);
+    const greekRho = "\u03c1rojects/123456789012/locations/global/workloadIdentityPools/1234-pool/providers/5provider";
+    expect(run(greekRho)).toBe("provider=" + canonical);
+    // Identifier segments must not be normalized as resource-type keywords.
+    expect(() => run(canonical.replace("123456789012", "12345678901\u0440"))).toThrow();
+  });
+
   it("preserves valid provider identifiers ending in u, e, or f", () => {
     for (const suffix of ["u", "e", "f"]) {
       const value = canonical.replace("5provider", "valid-provider" + suffix);
