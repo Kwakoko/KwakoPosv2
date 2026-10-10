@@ -112,6 +112,7 @@
     "certify:autonomous-operations": "tsx scripts/certification/runAutonomousOperationsCertification.ts",
     "certify:platform-intelligence": "tsx scripts/certification/runPlatformIntelligenceCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
+    "certify:retail-lock": "tsx scripts/certification/retail-production-lock.ts",
     "certify:restaurant": "tsx scripts/certification/runRestaurantCertification.ts",
     "certify:pharmacy": "tsx scripts/certification/runPharmacyCertification.ts",
     "certify:lawfirm": "tsx scripts/certification/runLawFirmCertification.ts",

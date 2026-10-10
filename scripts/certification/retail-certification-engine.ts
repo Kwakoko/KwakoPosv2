@@ -51,8 +51,10 @@ export async function evaluateRetailCertification(): Promise<{
     { id: 1, name: "Retail Module Architecture & Manifest", description: "Manifest exposes Retail module, checkout capability, route, and multi-branch scale.", run: () => {
       const m = engine.getModuleManifest();
       return m.moduleId === "retail_operating_system" && m.status === "ACTIVE" &&
-        m.permissions.includes("RETAIL_POS_CHECKOUT") && m.navigationRoutes.includes("/retail/pos") &&
-        m.supportedScales.includes("MULTI_BRANCH");
+        m.permissions.includes("RETAIL_POS_CHECKOUT") &&
+        m.permissions.includes("RETAIL_PROMOTION_VIEW") &&
+        m.permissions.includes("RETAIL_PROMOTION_MANAGE") &&
+        m.navigationRoutes.includes("/retail/pos") && m.supportedScales.includes("MULTI_BRANCH");
     }},
     { id: 2, name: "Product Catalog (Simple & Variant)", description: "Settings defaults satisfy the contract and catalog services expose persisted product/variant operations.", run: () =>
       RetailSettingsSchema.safeParse(defaults).success &&
@@ -91,11 +93,13 @@ export async function evaluateRetailCertification(): Promise<{
         basePrice: 1000, priceListPrice: 1050, branchPrice: 1100, bulkPrice: 950,
         wholesalePrice: 900, promotionalPrice: 850, customerPrice: 800, costPrice: 600, quantity: 10,
       }) === 800 && hasAll("packages/database/src/pricingAuthority.ts", "SALE_PRICE_AUTHORITY_VIOLATION") },
-    { id: 12, name: "Promotions & Discounts", description: "Promotion math and permission-gated API routes exist.", run: () =>
+    { id: 12, name: "Promotions & Discounts", description: "Percentage/fixed Retail promotions persist through PostgreSQL; unsupported types fail closed instead of being stored with incorrect semantics.", run: () =>
       engine.evaluatePricingAndTaxes(10000, 0, true, {
         id: "PROMO-TEST", tenantId: ctx.tenantId, branchId: ctx.branchId, name: "Test", type: "PERCENTAGE_DISCOUNT",
         discountValue: 10, startDate: new Date(), endDate: new Date(Date.now() + 86400000), isActive: true,
-      }).discountAmount === 1000 && hasAll("apps/api/src/server.ts", "/api/v1/pricing/promotions", "DISCOUNT_MANAGE") },
+      }).discountAmount === 1000 &&
+      hasAll("apps/api/src/services/retailService.ts", "tx.pricingPromotion.create", "sourceModule: \"RETAIL\"", "RETAIL_PROMOTION_TYPE_UNSUPPORTED") &&
+      hasAll("apps/api/src/server.ts", "/api/v1/retail/promotions", "RETAIL_PROMOTION_VIEW", "RETAIL_PROMOTION_MANAGE", "/api/v1/pricing/promotions", "DISCOUNT_MANAGE") },
     { id: 13, name: "Sales Returns & Refunds", description: "Duplicate variant lines cannot exceed sold quantity and persisted return limits are enforced.", run: () => {
       const sale: any = { saleNumber: "SALE-001", lines: [{ variantId: "v1", quantity: 2, unitPrice: 100, unitCost: 50, discountAmount: 0, taxAmount: 0, lineTotal: 200 }] };
       const valid = engine.validateSaleReturn(sale, [{ variantId: "v1", quantityReturned: 1, refundUnitPrice: 100 }], defaults);
@@ -143,16 +147,22 @@ export async function evaluateRetailCertification(): Promise<{
     { id: 20, name: "Retail Security & RBAC", description: "Retail actions require explicit capabilities at API boundary, with negative-path tests.", run: () =>
       hasAll("apps/api/src/server.ts", "assertRetailCapabilityForContext", "RETAIL_AI_INSIGHTS_VIEW", "RETAIL_REPLENISHMENT_EXECUTE") &&
       hasAll("tests/unit/retail-authorization.test.ts", "retail AI insights", "FORBIDDEN") },
-    { id: 21, name: "Auditability", description: "Retail service and commercial transactions record auditable actions.", run: () =>
-      hasAll("apps/api/src/services/retailService.ts", "recordAuditEvent", "POS_SALE_CHECKOUT") &&
+    { id: 21, name: "Auditability", description: "Retail audit events persist in PostgreSQL and commercial sale transactions write audit records within the authoritative transaction.", run: () =>
+      hasAll("apps/api/src/services/retailService.ts", "async recordAuditEvent", "prisma.auditEvent.create", "async getAuditEvents", "metadata: { module: \"RETAIL\"") &&
+      !readSource("apps/api/src/services/retailService.ts").includes("auditEventsMap") &&
       hasAll("packages/database/src/atomicCommercialFinance.ts", "tx.auditEvent.create", "SALE_CREATED") },
-    { id: 22, name: "Data Integrity & Hard Invariants", description: "Orphan variants and duplicate SKUs are rejected by executable invariant checks.", run: () => {
-      let orphan = false, duplicate = false;
+    { id: 22, name: "Data Integrity & Hard Invariants", description: "Orphan variants, duplicate SKUs, and duplicate branch-scoped barcodes are rejected by executable invariant checks and the database uniqueness migration.", run: () => {
+      let orphan = false, duplicate = false, duplicateBarcode = false;
       try { engine.assertRetailInvariants([], [{ id: "v1", productId: "missing", sku: "S1" }] as any, [], []); } catch { orphan = true; }
       try { engine.assertRetailInvariants([{ id: "p1" }] as any, [
         { id: "v1", productId: "p1", sku: "DUP" }, { id: "v2", productId: "p1", sku: "DUP" },
       ] as any, [], []); } catch { duplicate = true; }
-      return orphan && duplicate;
+      try { engine.assertRetailInvariants([{ id: "p1" }] as any, [
+        { id: "v1", tenantId: ctx.tenantId, branchId: ctx.branchId, productId: "p1", sku: "S1", barcode: "ABC" },
+        { id: "v2", tenantId: ctx.tenantId, branchId: ctx.branchId, productId: "p1", sku: "S2", barcode: "abc" },
+      ] as any, [], []); } catch { duplicateBarcode = true; }
+      return orphan && duplicate && duplicateBarcode &&
+        hasAll("packages/database/prisma/migrations/202610100002_variant_barcode_uniqueness/migration.sql", "CREATE UNIQUE INDEX", "RETAIL_BARCODE_DUPLICATES_BLOCK_MIGRATION");
     }},
     { id: 23, name: "Retail Notifications", description: "Notification dispatch and health contracts exist.", run: () =>
       hasAll("apps/api/src/services/notificationService.ts", "NotificationService", "NotificationCategory", "tenantId") &&

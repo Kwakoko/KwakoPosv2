@@ -1100,10 +1100,12 @@ model PricingPromotion {
   priority          Int      @default(0)
   stackable         Boolean  @default(false)
   requiredPermission String @default("DISCOUNT_MANAGE")
+  sourceModule       String?
   createdById        String
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   @@index([tenantId, branchId, variantId, isActive, startAt, endAt, priority])
+  @@index([tenantId, branchId, sourceModule, isActive], map: "pricing_promotions_tenant_branch_source_active_idx")
   @@map("pricing_promotions")
 }
 

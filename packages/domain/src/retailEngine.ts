@@ -29,6 +29,8 @@ export class RetailEngine {
         "RETAIL_INVENTORY_ADJUST",
         "RETAIL_POS_CHECKOUT",
         "RETAIL_POS_DISCOUNT_OVERRIDE",
+        "RETAIL_PROMOTION_VIEW",
+        "RETAIL_PROMOTION_MANAGE",
         "RETAIL_RETURN_PROCESS",
         "RETAIL_PURCHASE_MANAGE",
         "RETAIL_SUPPLIER_MANAGE",
@@ -180,7 +182,8 @@ export class RetailEngine {
         .map((val) => val.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 3))
         .join("-");
       const sku = `${cleanBaseSku}-${skuSuffix}`;
-      const barcodeSeed = Math.floor(10000000 + Math.random() * 90000000).toString();
+      // High-entropy CODE128-compatible identifier; database uniqueness remains authoritative.
+      const barcodeSeed = randomUUID().replace(/-/g, "").slice(0, 16).toUpperCase();
 
       return {
         name: `${productName} (${comboStr})`,
@@ -200,8 +203,8 @@ export class RetailEngine {
   generateSKU(prefix: string, productName: string, variantName?: string): string {
     const pClean = productName.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 4);
     const vClean = variantName ? "-" + variantName.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 3) : "";
-    const rand = Math.floor(1000 + Math.random() * 9000);
-    return `${prefix}${pClean}${vClean}-${rand}`;
+    const suffix = randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
+    return `${prefix}${pClean}${vClean}-${suffix}`;
   }
 
   generateBarcode(prefix: string, idSeed: string): string {
@@ -460,11 +463,11 @@ export class RetailEngine {
     reason?: string
   ): RetailAuditEvent {
     return {
-      eventId: `AUDIT-${randomUUID().slice(0, 8)}`,
+      eventId: `AUDIT-${randomUUID()}`,
       tenantId: ctx.tenantId,
       branchId: ctx.branchId,
       userId: ctx.userId,
-      deviceId: "POS-DEVICE-01",
+      deviceId: String((ctx as any).deviceId || ctx.userId || "UNKNOWN_DEVICE"),
       action,
       entityType,
       entityId,
@@ -489,13 +492,22 @@ export class RetailEngine {
       }
     }
 
-    // 2. Barcode & SKU Uniqueness Check
+    // 2. SKU and non-empty barcode uniqueness within the tenant/branch scope.
     const skus = new Set<string>();
+    const barcodes = new Set<string>();
     for (const v of variants) {
       if (skus.has(v.sku)) {
         throw new Error(`Duplicate SKU breach! SKU ${v.sku} is duplicated.`);
       }
       skus.add(v.sku);
+      const barcode = String(v.barcode ?? "").trim();
+      if (barcode) {
+        const scopedBarcode = `${v.tenantId}:${v.branchId}:${barcode.toUpperCase()}`;
+        if (barcodes.has(scopedBarcode)) {
+          throw new Error(`Duplicate barcode breach! Barcode ${barcode} is duplicated within its tenant/branch.`);
+        }
+        barcodes.add(scopedBarcode);
+      }
     }
 
     // 3. Stock Ledger Immutability Check

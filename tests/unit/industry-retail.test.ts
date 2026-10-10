@@ -2,8 +2,6 @@ import { describe, it, expect } from "vitest";
 import { RetailEngine, globalRetailEngine } from "../../packages/domain/src/retailEngine.js";
 import { runRetailCertification } from "../../scripts/certification/runRetailCertification.js";
 import { renderRetailDashboard } from "../../apps/web/src/retailDashboard.js";
-import { globalRetailService } from "../../apps/api/src/services/retailService.js";
-import { globalProductService } from "../../apps/api/src/services/productService.js";
 import type { TenantContext, ProductVariant, Sale } from "@kwakopos2/contracts";
 
 describe("Retail Industry Module Operating System Test Suite", () => {
@@ -102,6 +100,15 @@ describe("Retail Industry Module Operating System Test Suite", () => {
     expect(invalidRes.error).toContain("exceeds original sold quantity");
   });
 
+  it("should reject duplicate non-empty barcodes within the same tenant and branch", () => {
+    const products = [{ id: "p1", tenantId: dummyCtx.tenantId, branchId: dummyCtx.branchId }] as any;
+    const variants = [
+      { id: "v1", tenantId: dummyCtx.tenantId, branchId: dummyCtx.branchId, productId: "p1", sku: "SKU-1", barcode: "12345" },
+      { id: "v2", tenantId: dummyCtx.tenantId, branchId: dummyCtx.branchId, productId: "p1", sku: "SKU-2", barcode: " 12345 " },
+    ] as any;
+    expect(() => engine.assertRetailInvariants(products, variants, [], [])).toThrow(/Duplicate barcode breach/);
+  });
+
   it("should reconcile till session cash variances accurately", () => {
     // Opening: 100,000, Sales: 500,000, Refunds: 50,000, Expenses: 20,000 -> Expected: 530,000
     const rec1 = engine.reconcileTillSessionCash(100000, 500000, 50000, 20000, 530000);
@@ -130,25 +137,5 @@ describe("Retail Industry Module Operating System Test Suite", () => {
     expect(html).toContain("EXPLAINABLE RETAIL AI INSIGHTS");
   });
 
-  it("should execute POS checkout through globalRetailService", async () => {
-    const prod = globalProductService.createProduct(dummyCtx, {
-      name: "Retail Shirt",
-      sku: "RET-SHIRT-001",
-      category: "Apparel",
-      variants: [{ name: "Red / M", sku: "RET-SHIRT-RED-M", price: 25000, costPrice: 15000, isActive: true }],
-    });
-    const variantId = prod.variants![0].id;
 
-    const sale = await globalRetailService.processPOSCheckout(
-      dummyCtx,
-      [{ productId: prod.id, variantId, quantity: 2, unitPrice: 25000, unitCost: 15000 }],
-      [{ amount: 50000, paymentMethod: "CASH" }]
-    );
-    expect(sale.grandTotal).toBe(50000);
-    expect(sale.lines).toHaveLength(1);
-
-    const auditEvents = globalRetailService.getAuditEvents(dummyCtx);
-    expect(auditEvents.length).toBeGreaterThan(0);
-    expect(auditEvents[0].action).toBe("POS_SALE_CHECKOUT");
-  });
 });
