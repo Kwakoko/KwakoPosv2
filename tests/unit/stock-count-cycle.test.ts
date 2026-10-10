@@ -57,10 +57,10 @@ describe("H-013: StockCountEngine Cycle Count & Reconciliation Suite", () => {
     const session = engine.startSession(ctxA, { name: "Audit 01", scope: "FULL_STORE" }, baseline);
 
     // Count line 1: counted 95 (5 missing -> variance -5)
-    engine.recordCount(ctxA, session.id, { variantId: "V1", countedQuantity: 95 });
+    const afterFirst = engine.recordCount(ctxA, session, { variantId: "V1", countedQuantity: 95 });
 
     // Count line 2: counted 52 (2 extra -> variance +2)
-    const updated = engine.recordCount(ctxA, session.id, { variantId: "V2", countedQuantity: 52 });
+    const updated = engine.recordCount(ctxA, afterFirst, { variantId: "V2", countedQuantity: 52 });
 
     expect(updated.totalItemsCounted).toBe(2);
     expect(updated.totalDiscrepantItems).toBe(2);
@@ -76,10 +76,10 @@ describe("H-013: StockCountEngine Cycle Count & Reconciliation Suite", () => {
     ];
 
     const session = engine.startSession(ctxA, { name: "Audit 02", scope: "FULL_STORE" }, baseline);
-    engine.recordCount(ctxA, session.id, { variantId: "V1", countedQuantity: 98 }); // -2
-    engine.recordCount(ctxA, session.id, { variantId: "V2", countedQuantity: 50 }); // balanced (0)
+    const afterFirst = engine.recordCount(ctxA, session, { variantId: "V1", countedQuantity: 98 }); // -2
+    const afterSecond = engine.recordCount(ctxA, afterFirst, { variantId: "V2", countedQuantity: 50 }); // balanced (0)
 
-    const { session: reconciled, adjustmentsToPost } = engine.reconcileSession(ctxA, session.id, {
+    const { session: reconciled, adjustmentsToPost } = engine.reconcileSession(ctxA, afterSecond, {
       autoAdjustLedger: true,
       adjustmentReason: "End of month physical count",
     });
@@ -90,7 +90,7 @@ describe("H-013: StockCountEngine Cycle Count & Reconciliation Suite", () => {
     expect(adjustmentsToPost[0].quantityChange).toBe(-2);
 
     // Finalize
-    const finalized = engine.finalizeSession(ctxA, session.id);
+    const finalized = engine.finalizeSession(ctxA, reconciled);
     expect(finalized.status).toBe("POSTED");
     expect(finalized.approvedById).toBe(ctxA.userId);
   });
@@ -99,9 +99,8 @@ describe("H-013: StockCountEngine Cycle Count & Reconciliation Suite", () => {
     const baseline = [{ productId: "P1", variantId: "V1", sku: "SKU-01", productName: "Item", systemQuantity: 10, unitCost: 100 }];
     const sessionA = engine.startSession(ctxA, { name: "Tenant A Audit", scope: "FULL_STORE" }, baseline);
 
-    // Tenant B cannot access or record count in Tenant A session
-    expect(() => engine.getSession(ctxB, sessionA.id)).toThrowError("TENANT_BOUNDARY_VIOLATION");
-    expect(() => engine.recordCount(ctxB, sessionA.id, { variantId: "V1", countedQuantity: 10 })).toThrowError(
+    // Tenant B cannot apply a count to a foreign tenant/branch value object.
+    expect(() => engine.recordCount(ctxB, sessionA, { variantId: "V1", countedQuantity: 10 })).toThrowError(
       "TENANT_BOUNDARY_VIOLATION"
     );
   });
