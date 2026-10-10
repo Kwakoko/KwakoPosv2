@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
-import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering, assertBackdatingThreshold, assertSaleBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline } from "@kwakopos2/domain";
+import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering, assertBackdatingThreshold, assertSaleBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline, applyRetailPricingPromotions } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
 import { PricingAuthority } from "./pricingAuthority.js";
 import { resolveBundleDefinition } from "./bundleInventory.js";

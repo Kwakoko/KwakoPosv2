@@ -81,13 +81,22 @@ export class RetailService {
   }
 
   private toRetailPromotion(row: any): RetailPromotion {
+    const kind = String(row.kind).toUpperCase();
+    const type = kind === "PERCENTAGE" || kind === "PERCENTAGE_DISCOUNT" ? "PERCENTAGE_DISCOUNT"
+      : kind === "FIXED" || kind === "FIXED_AMOUNT_DISCOUNT" ? "FIXED_AMOUNT_DISCOUNT"
+      : kind === "BUY_X_GET_Y" ? "BUY_X_GET_Y" : "QUANTITY_VOLUME_DISCOUNT";
     return {
       id: String(row.id),
       tenantId: String(row.tenantId),
       branchId: row.branchId ? String(row.branchId) : undefined,
+      variantId: row.variantId ? String(row.variantId) : undefined,
+      rewardVariantId: row.rewardVariantId ? String(row.rewardVariantId) : undefined,
       name: String(row.name),
-      type: row.kind === "PERCENTAGE" ? "PERCENTAGE_DISCOUNT" : "FIXED_AMOUNT_DISCOUNT",
+      type,
       discountValue: Number(row.value),
+      buyQuantity: row.buyQuantity == null ? undefined : Number(row.buyQuantity),
+      getQuantity: row.getQuantity == null ? undefined : Number(row.getQuantity),
+      minQuantity: row.minQuantity == null ? undefined : Number(row.minQuantity),
       minOrderAmount: row.minOrderAmount == null ? undefined : Number(row.minOrderAmount),
       startDate: new Date(row.startAt),
       endDate: new Date(row.endAt),
@@ -100,19 +109,38 @@ export class RetailService {
     ctx: TenantContext,
     promo: Omit<RetailPromotion, "id" | "tenantId">
   ): Promise<RetailPromotion> {
-    const kind = promo.type === "PERCENTAGE_DISCOUNT"
-      ? "PERCENTAGE"
-      : promo.type === "FIXED_AMOUNT_DISCOUNT" ? "FIXED" : null;
-    if (!kind) {
-      // Never store unsupported promotion types as if their checkout semantics were implemented.
-      throw new Error("RETAIL_PROMOTION_TYPE_UNSUPPORTED:" + promo.type);
-    }
+    const kindByType: Record<RetailPromotion["type"], string> = {
+      PERCENTAGE_DISCOUNT: "PERCENTAGE",
+      FIXED_AMOUNT_DISCOUNT: "FIXED",
+      BUY_X_GET_Y: "BUY_X_GET_Y",
+      QUANTITY_VOLUME_DISCOUNT: "QUANTITY_VOLUME_DISCOUNT",
+    };
+    const kind = kindByType[promo.type];
+    if (!kind) throw new Error("RETAIL_PROMOTION_TYPE_UNSUPPORTED:" + promo.type);
     if (promo.branchId && promo.branchId !== ctx.branchId) {
       throw new Error("RETAIL_PROMOTION_BRANCH_BOUNDARY_VIOLATION");
     }
     const value = Number(promo.discountValue);
-    if (!Number.isFinite(value) || value < 0 || (kind === "PERCENTAGE" && value > 100)) {
+    const percentageKind = kind === "PERCENTAGE" || kind === "BUY_X_GET_Y" || kind === "QUANTITY_VOLUME_DISCOUNT";
+    if (!Number.isFinite(value) || value < 0 || (percentageKind && value > 100)) {
       throw new Error("RETAIL_PROMOTION_VALUE_INVALID");
+    }
+    const buyQuantity = promo.buyQuantity == null ? null : Number(promo.buyQuantity);
+    const getQuantity = promo.getQuantity == null ? null : Number(promo.getQuantity);
+    const minQuantity = promo.minQuantity == null ? null : Number(promo.minQuantity);
+    if (kind === "BUY_X_GET_Y" &&
+        (!Number.isFinite(buyQuantity) || Number(buyQuantity) <= 0 || !Number.isFinite(getQuantity) || Number(getQuantity) <= 0)) {
+      throw new Error("RETAIL_PROMOTION_BUY_GET_QUANTITY_REQUIRED");
+    }
+    if (kind === "QUANTITY_VOLUME_DISCOUNT" && (!Number.isFinite(minQuantity) || Number(minQuantity) <= 0)) {
+      throw new Error("RETAIL_PROMOTION_MIN_QUANTITY_REQUIRED");
+    }
+    for (const variantId of [promo.variantId, promo.rewardVariantId].filter(Boolean) as string[]) {
+      const variant = await prisma.productVariant.findFirst({
+        where: { id: variantId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true },
+        select: { id: true },
+      });
+      if (!variant) throw new Error("RETAIL_PROMOTION_VARIANT_NOT_FOUND_IN_ACTIVE_SCOPE");
     }
     const startAt = promo.startDate instanceof Date ? new Date(promo.startDate.getTime()) : new Date(promo.startDate);
     const endAt = promo.endDate instanceof Date ? new Date(promo.endDate.getTime()) : new Date(promo.endDate);
@@ -126,11 +154,14 @@ export class RetailService {
           id: randomUUID(),
           tenantId: ctx.tenantId,
           branchId: ctx.branchId,
-          variantId: null,
+          variantId: promo.variantId || null,
+          rewardVariantId: promo.rewardVariantId || null,
           name: String(promo.name).trim(),
           kind,
           value,
-          minQuantity: null,
+          buyQuantity,
+          getQuantity,
+          minQuantity,
           minOrderAmount: promo.minOrderAmount ?? null,
           startAt,
           endAt,
