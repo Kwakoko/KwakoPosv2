@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import type {
   TenantContext,
   StockCountSession,
@@ -17,14 +17,66 @@ export interface StockSnapshotItem {
   unitCost: number;
 }
 
+/**
+ * Apply one physical count to an immutable line value. Persisting the resulting
+ * session belongs to the PostgreSQL inventory production lock, never a process Map.
+ */
+export function applyCountToLine(
+  line: StockCountLine,
+  req: RecordCountItemRequest,
+  userId?: string,
+  countedAt = new Date().toISOString(),
+): StockCountLine {
+  const countedQuantity = Number(req.countedQuantity);
+  if (!Number.isFinite(countedQuantity) || countedQuantity < 0) {
+    throw new Error("STOCK_COUNT_QUANTITY_INVALID");
+  }
+  const varianceQuantity = Math.round((countedQuantity - Number(line.systemQuantity)) * 10000) / 10000;
+  const varianceValue = Math.round(varianceQuantity * Number(line.unitCost) * 100) / 100;
+  return {
+    ...line,
+    countedQuantity,
+    varianceQuantity,
+    varianceValue,
+    notes: req.notes || line.notes,
+    countedByUserId: userId,
+    countedAt,
+  };
+}
+
+/** Recalculate aggregate counts from persisted/value-object count lines. */
+export function recalculateStockCountSession(session: StockCountSession): StockCountSession {
+  let totalItemsCounted = 0;
+  let totalDiscrepantItems = 0;
+  let netVarianceQuantity = 0;
+  let netVarianceValue = 0;
+  for (const line of session.lines) {
+    if (line.countedQuantity === null) continue;
+    totalItemsCounted += 1;
+    if (Math.abs(line.varianceQuantity) > 0.0001) totalDiscrepantItems += 1;
+    netVarianceQuantity += line.varianceQuantity;
+    netVarianceValue += line.varianceValue;
+  }
+  return {
+    ...session,
+    lines: session.lines.map((line) => ({ ...line })),
+    totalItemsCounted,
+    totalDiscrepantItems,
+    netVarianceQuantity: Math.round(netVarianceQuantity * 10000) / 10000,
+    netVarianceValue: Math.round(netVarianceValue * 100) / 100,
+  };
+}
+
+/**
+ * Pure stock-count domain calculations only. Session values are explicit inputs
+ * and outputs; durable session ownership and concurrency are handled by the
+ * PostgreSQL production-lock transaction in packages/sync.
+ */
 export class StockCountEngine {
   private static instance: StockCountEngine | null = null;
-  private sessions = new Map<string, StockCountSession>();
 
   public static getInstance(): StockCountEngine {
-    if (!StockCountEngine.instance) {
-      StockCountEngine.instance = new StockCountEngine();
-    }
+    if (!StockCountEngine.instance) StockCountEngine.instance = new StockCountEngine();
     return StockCountEngine.instance;
   }
 
@@ -32,52 +84,43 @@ export class StockCountEngine {
     StockCountEngine.instance = new StockCountEngine();
   }
 
-  private assertIsolation(ctx: TenantContext, tenantId: string): void {
-    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || ctx.roles?.includes("SUPERADMIN");
-    if (!isSuperAdmin && ctx.tenantId !== tenantId) {
-      throw new Error(
-        `TENANT_BOUNDARY_VIOLATION: Context tenant '${ctx.tenantId}' cannot access count session of tenant '${tenantId}'.`
-      );
+  private assertSessionScope(ctx: TenantContext, session: StockCountSession): void {
+    const elevated = ctx.roles?.some((role) => ["SUPER_ADMIN", "SUPERADMIN"].includes(String(role).toUpperCase())) ?? false;
+    if (!elevated && (ctx.tenantId !== session.tenantId || ctx.branchId !== session.branchId)) {
+      throw new Error("TENANT_BOUNDARY_VIOLATION: Count session does not belong to the active tenant and branch.");
     }
   }
 
-  /**
-   * Start a new cycle count session with system baseline snapshot
-   */
   public startSession(
     ctx: TenantContext,
     req: StartStockCountRequest,
-    baselineItems: StockSnapshotItem[]
+    baselineItems: StockSnapshotItem[],
   ): StockCountSession {
     const now = new Date().toISOString();
     const id = randomUUID();
-    const sessionNumber = `COUNT-${Date.now().toString(36).toUpperCase()}`;
-
-    const lines: StockCountLine[] = baselineItems.map((item) => ({
-      id: randomUUID(),
-      sessionId: id,
-      productId: item.productId,
-      variantId: item.variantId,
-      sku: item.sku,
-      productName: item.productName,
-      systemQuantity: item.systemQuantity,
-      countedQuantity: null, // not yet counted
-      varianceQuantity: 0,
-      varianceValue: 0,
-      unitCost: item.unitCost,
-    }));
-
     const session: StockCountSession = {
       id,
       tenantId: ctx.tenantId,
       branchId: ctx.branchId,
-      sessionNumber,
+      sessionNumber: "COUNT-" + Date.now().toString(36).toUpperCase(),
       name: req.name,
       scope: req.scope,
       status: "COUNTING",
       categoryId: req.categoryId,
       locationId: req.locationId,
-      lines,
+      lines: baselineItems.map((item) => ({
+        id: randomUUID(),
+        sessionId: id,
+        productId: item.productId,
+        variantId: item.variantId,
+        sku: item.sku,
+        productName: item.productName,
+        systemQuantity: item.systemQuantity,
+        countedQuantity: null,
+        varianceQuantity: 0,
+        varianceValue: 0,
+        unitCost: item.unitCost,
+      })),
       totalItemsCounted: 0,
       totalDiscrepantItems: 0,
       netVarianceQuantity: 0,
@@ -88,144 +131,55 @@ export class StockCountEngine {
       createdAt: now,
       updatedAt: now,
     };
-
-    this.sessions.set(id, session);
-    return { ...session };
+    return recalculateStockCountSession(session);
   }
 
-  /**
-   * Record physical count for a line item within an active session
-   */
   public recordCount(
     ctx: TenantContext,
-    sessionId: string,
-    req: RecordCountItemRequest
+    session: StockCountSession,
+    req: RecordCountItemRequest,
   ): StockCountSession {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`STOCK_COUNT_NOT_FOUND: Session ${sessionId} does not exist.`);
-    this.assertIsolation(ctx, session.tenantId);
-
-    if (session.status !== "COUNTING") {
-      throw new Error(`INVALID_SESSION_STATUS: Cannot record counts when session status is ${session.status}.`);
-    }
-
-    const line = session.lines.find((l) => l.variantId === req.variantId);
-    if (!line) {
-      throw new Error(`VARIANT_NOT_IN_SESSION: Variant ${req.variantId} is not part of count session ${sessionId}.`);
-    }
-
+    this.assertSessionScope(ctx, session);
+    if (session.status !== "COUNTING") throw new Error("INVALID_SESSION_STATUS: Count entry requires COUNTING status.");
+    const index = session.lines.findIndex((line) => line.variantId === req.variantId);
+    if (index < 0) throw new Error("VARIANT_NOT_IN_SESSION: Variant " + req.variantId + " is not in this count session.");
     const now = new Date().toISOString();
-    line.countedQuantity = req.countedQuantity;
-    line.varianceQuantity = Math.round((req.countedQuantity - line.systemQuantity) * 10000) / 10000;
-    line.varianceValue = Math.round(line.varianceQuantity * line.unitCost * 100) / 100;
-    line.notes = req.notes || line.notes;
-    line.countedByUserId = ctx.userId;
-    line.countedAt = now;
-
-    // Recalculate session totals
-    this.recalculateSessionMetrics(session);
-    session.updatedAt = now;
-
-    return { ...session };
+    const lines = session.lines.map((line, lineIndex) =>
+      lineIndex === index ? applyCountToLine(line, req, ctx.userId, now) : { ...line }
+    );
+    return recalculateStockCountSession({ ...session, lines, updatedAt: now });
   }
 
-  /**
-   * Transition session to RECONCILING and calculate final discrepancy totals
-   */
   public reconcileSession(
     ctx: TenantContext,
-    sessionId: string,
-    req: ReconcileStockCountRequest
+    session: StockCountSession,
+    req: ReconcileStockCountRequest,
   ): { session: StockCountSession; adjustmentsToPost: Array<{ variantId: string; quantityChange: number; reason: string }> } {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`STOCK_COUNT_NOT_FOUND: Session ${sessionId} does not exist.`);
-    this.assertIsolation(ctx, session.tenantId);
-
-    if (session.status !== "COUNTING") {
-      throw new Error(`INVALID_SESSION_STATUS: Cannot reconcile when session status is ${session.status}.`);
-    }
-
+    this.assertSessionScope(ctx, session);
+    if (session.status !== "COUNTING") throw new Error("INVALID_SESSION_STATUS: Reconciliation requires COUNTING status.");
     const now = new Date().toISOString();
-    session.status = "RECONCILING";
-    session.reconciledAt = now;
-    session.notes = req.notes || session.notes;
-    session.updatedAt = now;
-
-    this.recalculateSessionMetrics(session);
-
-    const adjustmentsToPost = session.lines
-      .filter((l) => l.varianceQuantity !== 0)
-      .map((l) => ({
-        variantId: l.variantId,
-        quantityChange: l.varianceQuantity,
-        reason: `${req.adjustmentReason} (Session: ${session.sessionNumber})`,
+    const reconciled = recalculateStockCountSession({
+      ...session,
+      status: "RECONCILING",
+      reconciledAt: now,
+      notes: req.notes || session.notes,
+      updatedAt: now,
+    });
+    const adjustmentsToPost = reconciled.lines
+      .filter((line) => line.countedQuantity !== null && Math.abs(line.varianceQuantity) > 0.0000001)
+      .map((line) => ({
+        variantId: line.variantId,
+        quantityChange: line.varianceQuantity,
+        reason: req.adjustmentReason + " (Session: " + reconciled.sessionNumber + ")",
       }));
-
-    return { session: { ...session }, adjustmentsToPost };
+    return { session: reconciled, adjustmentsToPost };
   }
 
-  /**
-   * Finalize and mark session as POSTED after ledger adjustments have been committed
-   */
-  public finalizeSession(ctx: TenantContext, sessionId: string): StockCountSession {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`STOCK_COUNT_NOT_FOUND: Session ${sessionId} does not exist.`);
-    this.assertIsolation(ctx, session.tenantId);
-
-    if (session.status !== "RECONCILING") {
-      throw new Error(`INVALID_SESSION_STATUS: Cannot finalize when session status is ${session.status}.`);
-    }
-
+  public finalizeSession(ctx: TenantContext, session: StockCountSession): StockCountSession {
+    this.assertSessionScope(ctx, session);
+    if (session.status !== "RECONCILING") throw new Error("INVALID_SESSION_STATUS: Finalization requires RECONCILING status.");
     const now = new Date().toISOString();
-    session.status = "POSTED";
-    session.postedAt = now;
-    session.approvedById = ctx.userId;
-    session.updatedAt = now;
-
-    return { ...session };
-  }
-
-  /**
-   * Get session by ID
-   */
-  public getSession(ctx: TenantContext, sessionId: string): StockCountSession | null {
-    const session = this.sessions.get(sessionId);
-    if (!session) return null;
-    this.assertIsolation(ctx, session.tenantId);
-    return { ...session };
-  }
-
-  /**
-   * List all sessions for the context tenant/branch
-   */
-  public listSessions(ctx: TenantContext): StockCountSession[] {
-    this.assertIsolation(ctx, ctx.tenantId);
-    return Array.from(this.sessions.values())
-      .filter((s) => s.tenantId === ctx.tenantId && s.branchId === ctx.branchId)
-      .map((s) => ({ ...s }));
-  }
-
-  private recalculateSessionMetrics(session: StockCountSession): void {
-    let countedCount = 0;
-    let discrepantCount = 0;
-    let netVarianceQty = 0;
-    let netVarianceVal = 0;
-
-    for (const line of session.lines) {
-      if (line.countedQuantity !== null) {
-        countedCount++;
-        if (Math.abs(line.varianceQuantity) > 0.0001) {
-          discrepantCount++;
-        }
-        netVarianceQty += line.varianceQuantity;
-        netVarianceVal += line.varianceValue;
-      }
-    }
-
-    session.totalItemsCounted = countedCount;
-    session.totalDiscrepantItems = discrepantCount;
-    session.netVarianceQuantity = Math.round(netVarianceQty * 10000) / 10000;
-    session.netVarianceValue = Math.round(netVarianceVal * 100) / 100;
+    return { ...session, status: "POSTED", postedAt: now, approvedById: ctx.userId, updatedAt: now };
   }
 }
 
