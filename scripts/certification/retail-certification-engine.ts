@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { RetailSettingsSchema } from "@kwakopos2/contracts";
+import { RetailSettingsSchema } from "../../packages/contracts/src/retailContracts.js";
 import { PricingTaxEngine, RetailEngine } from "@kwakopos2/domain";
 import { renderRetailDashboard } from "../../apps/web/src/retailDashboard.js";
 
