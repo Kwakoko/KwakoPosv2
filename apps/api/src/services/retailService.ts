@@ -169,8 +169,9 @@ export class RetailService {
         tenantId: ctx.tenantId,
         sourceModule: "RETAIL",
         OR: [{ branchId: null }, { branchId: ctx.branchId }],
+        isActive: true,
       },
-      orderBy: [{ isActive: "desc" }, { priority: "desc" }, { startAt: "desc" }],
+      orderBy: [{ priority: "desc" }, { startAt: "desc" }],
     });
     return rows.map((row: any) => this.toRetailPromotion(row));
   }
