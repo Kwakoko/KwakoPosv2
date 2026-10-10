@@ -464,7 +464,7 @@ export class RetailEngine {
       tenantId: ctx.tenantId,
       branchId: ctx.branchId,
       userId: ctx.userId,
-      deviceId: "POS-DEVICE-01",
+      deviceId: String((ctx as any).deviceId || ctx.userId || "UNKNOWN_DEVICE"),
       action,
       entityType,
       entityId,
