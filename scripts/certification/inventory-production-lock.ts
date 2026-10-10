@@ -10,7 +10,7 @@ const REQUIRED_SUBITEMS = [
 ];
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "apps/web/src/pages/InventoryPage.tsx": "47f1504cf358aa6a6a3070c7cb36d65177ed1ef7",
+  "apps/web/src/pages/InventoryPage.tsx": "1aada87ec4442b426973a2bba97c3d920fa86f04",
   "apps/web/src/services/inventoryStockService.ts": "5fadbef7dc8de26e7bc93ce95547cf7a9c8f7e3b",
   "packages/database/src/prismaRepositories.ts": "810e75a92ad082318e7fc5157a2c217ccd04add5",
   "packages/database/src/inventoryAuthority.ts": "fd3d915de4ac1851a562ee3554c5598d71529cc9",
