@@ -4978,6 +4978,40 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.send({ success: true, data: await globalRetailService.getSettings(ctx) });
   });
 
+  server.get("/api/v1/retail/promotions", async (req, reply) => {
+    const ctx = assertRetailCapabilityForContext(
+      requireTenantContext(req),
+      "RETAIL_PROMOTION_VIEW",
+      ["discount.read", "discount.manage", "pricing.manage"],
+    );
+    const { globalRetailService } = await import("./services/retailService.js");
+    return reply.send({ success: true, data: await globalRetailService.getPromotions(ctx) });
+  });
+
+  server.post("/api/v1/retail/promotions", async (req, reply) => {
+    const ctx = assertRetailCapabilityForContext(
+      requireTenantContext(req),
+      "RETAIL_PROMOTION_MANAGE",
+      ["discount.manage", "pricing.manage"],
+    );
+    const body = z.object({
+      branchId: z.string().uuid().optional(),
+      name: z.string().trim().min(1).max(160),
+      type: z.enum(["PERCENTAGE_DISCOUNT", "FIXED_AMOUNT_DISCOUNT", "BUY_X_GET_Y", "QUANTITY_VOLUME_DISCOUNT"]),
+      discountValue: z.number().finite().nonnegative(),
+      buyQuantity: z.number().finite().positive().optional(),
+      getQuantity: z.number().finite().positive().optional(),
+      minOrderAmount: z.number().finite().nonnegative().optional(),
+      startDate: z.coerce.date(),
+      endDate: z.coerce.date(),
+      isActive: z.boolean().optional(),
+      requiredRoleToApply: z.string().trim().min(1).max(100).optional(),
+    }).strict().parse(req.body || {});
+    const { globalRetailService } = await import("./services/retailService.js");
+    const created = await globalRetailService.createPromotion(ctx, body);
+    return reply.status(201).send({ success: true, data: created });
+  });
+
   server.post("/api/v1/retail/settings", async (req, reply) => {
     const ctx = assertRetailCapabilityForContext(requireTenantContext(req), "RETAIL_SETTINGS_MANAGE");
     assertRetailCapabilityForContext(ctx, "SETTINGS_MANAGE", ["settings.manage"]);
