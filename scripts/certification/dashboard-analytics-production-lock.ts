@@ -3,11 +3,11 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
-const LOCK_ID = "DASHBOARD-ANALYTICS-PRODUCTION-LOCK-2026-10-04";
+const LOCK_ID = "DASHBOARD-ANALYTICS-PRODUCTION-LOCK-2026-10-10";
 
 const LOCKED_BLOBS: Record<string, string> = {
   "package.json": "dc0bdaae20acfde9c106e1c9617430fd26162d87",
-  "apps/web/src/pages/DashboardPage.tsx": "59b98fc129531507362218674b135597bf224f8d",
+  "apps/web/src/pages/DashboardPage.tsx": "efdd50c89ebe793382c3b976558a9fbdab4d7701",
   "apps/api/src/services/dashboardKpiService.ts": "f07c91ae53ef563119ee24ee4efd4c149468b784",
   "apps/web/src/services/dashboardKpiService.ts": "9c624cadd529f028ebb46ca4fdfc95712e677d84",
   "packages/database/src/prismaProductionRepositories.ts": "b2cf81b306fca370b230e8554c60b33c920279eb",
