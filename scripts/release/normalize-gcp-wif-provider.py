@@ -59,16 +59,29 @@ def _is_keyword_ignorable(character: str) -> bool:
     return any(start <= codepoint <= end for start, end in DEFAULT_IGNORABLE_RANGES)
 
 
+# Common cross-script homoglyphs are normalized only for Google's fixed
+# resource-type keywords. Resource identifiers are never passed through this map.
+KEYWORD_CONFUSABLES = str.maketrans({
+    # Cyrillic lookalikes
+    "\u0435": "e", "\u0433": "r", "\u0458": "j", "\u0455": "s",
+    "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0442": "t",
+    # Greek lookalikes
+    "\u03b5": "e", "\u03f2": "c", "\u03bf": "o", "\u03c1": "p",
+    "\u03c4": "t", "\u03c2": "s", "\u03c3": "s",
+})
+
+
 def _canonicalize_resource_keyword(value: str, expected: str) -> str:
     # Provider resource-type keywords are fixed tokens, not identifiers.
-    # Normalize compatibility glyphs and strip Unicode default-ignorables only
-    # in these keyword positions, including Hangul fillers (category Lo).
+    # Normalize compatibility glyphs, known keyword-only homoglyphs, and
+    # Unicode default-ignorables only at fixed keyword positions.
     # Project number, pool ID, and provider ID segments never pass through
-    # this function and remain strictly validated.
+    # this function or its confusable map and remain strictly validated.
     candidate = unicodedata.normalize("NFKC", value)
     candidate = "".join(character for character in candidate if not _is_keyword_ignorable(character))
     candidate = _strip_boundary_format_marks(candidate)
-    return expected if candidate.casefold() == expected.casefold() else value
+    skeleton = candidate.casefold().translate(KEYWORD_CONFUSABLES)
+    return expected if skeleton == expected.casefold() else value
 
 
 def normalize(value: str) -> str:
