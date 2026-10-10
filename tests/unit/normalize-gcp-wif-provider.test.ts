@@ -120,6 +120,12 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(run('  "' + canonical + '"  ')).toBe("provider=" + canonical);
   });
 
+  it("strips only known provider environment assignment wrappers", () => {
+    expect(run("GCP_WIF_PROVIDER=" + canonical)).toBe("provider=" + canonical);
+    expect(run("export GCP_WORKLOAD_IDENTITY_PROVIDER='" + canonical + "'")).toBe("provider=" + canonical);
+    expect(() => run("UNTRUSTED_PROVIDER=" + canonical)).toThrow();
+  });
+
   it("normalizes line-wrapped resource values without relaxing shape validation", () => {
     const wrapped =
       "projects/123456789012/locations/global/\r\n  workloadIdentityPools/1234-pool/\n providers/5provider";
