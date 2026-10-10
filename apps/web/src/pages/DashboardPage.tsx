@@ -204,12 +204,11 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
     return x + ',' + y;
   }).join(' ');
   const area = '0,' + height + ' ' + points + ' ' + width + ',' + height;
-  const cardClass = 'relative overflow-hidden rounded-xl border transition-all duration-200 ' +
-    (onClick ? 'cursor-pointer hover:-translate-y-0.5 ' : '') +
-    (variant === 'hero' ? 'min-h-[198px] p-5' : 'min-h-[126px] p-4');
-  const iconClass = (variant === 'hero' ? 'h-11 w-11 rounded-xl' : 'h-10 w-10 rounded-xl') +
-    ' flex items-center justify-center shrink-0';
-  const valueClass = (variant === 'hero' ? 'mt-5 text-[38px]' : 'mt-3 text-[27px]') +
+  const cardClass = 'dashboard-kpi-card dashboard-kpi-card--' + variant +
+    ' relative overflow-hidden rounded-xl border transition-all duration-200 ' +
+    (onClick ? 'cursor-pointer hover:-translate-y-0.5' : '');
+  const iconClass = 'dashboard-kpi-icon flex items-center justify-center shrink-0';
+  const valueClass = 'dashboard-kpi-value dashboard-kpi-value--' + variant +
     ' font-black leading-none tracking-tight text-white';
 
   return (
@@ -223,18 +222,18 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
         (variant === 'hero' ? '-right-8 -top-10 h-32 w-32' : '-right-6 -top-8 h-24 w-24')}
         style={{ background: accent }} />
       <div className="relative z-10 flex items-start justify-between gap-4">
-        <div className="min-w-0">
+        <div className="dashboard-kpi-copy min-w-0">
           <div className="flex items-center gap-3">
             <div className={iconClass} style={{ background: accent + '22', color: accent }}>
               {icon}
             </div>
             <div>
-              <p className="text-[12px] font-black uppercase tracking-wide" style={{ color: '#6b86ad' }}>{title}</p>
+              <p className="dashboard-kpi-title font-black uppercase tracking-wide" style={{ color: '#6b86ad' }}>{title}</p>
               {trend && <p className="mt-1 text-[11px] font-semibold text-emerald-400">{'↑'} {trend}</p>}
             </div>
           </div>
           <p className={valueClass}>{value}</p>
-          <p className="mt-3 max-w-[90%] text-[11px] leading-relaxed" style={{ color: '#6b86ad' }}>{description}</p>
+          <p className="dashboard-kpi-description" style={{ color: '#6b86ad' }}>{description}</p>
           {action && (
             <button type="button"
               onClick={(e) => { e.stopPropagation(); action.onClick(); }}
@@ -245,8 +244,8 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
             </button>
           )}
         </div>
-        <svg width={variant === 'hero' ? 118 : 100} height={variant === 'hero' ? 58 : 48}
-          viewBox={'0 0 ' + width + ' ' + height} className="mt-8 shrink-0 overflow-visible" aria-hidden="true">
+        <svg width={variant === 'hero' ? 84 : 76} height={variant === 'hero' ? 38 : 34}
+          viewBox={'0 0 ' + width + ' ' + height} className="mt-3 shrink-0 overflow-visible dashboard-kpi-sparkline" aria-hidden="true">
           <polygon points={area} fill={accent} opacity="0.10" />
           <polyline points={points} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
