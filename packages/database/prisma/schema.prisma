@@ -1105,6 +1105,7 @@ model PricingPromotion {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   @@index([tenantId, branchId, variantId, isActive, startAt, endAt, priority])
+  @@index([tenantId, branchId, sourceModule, isActive], map: "pricing_promotions_tenant_branch_source_active_idx")
   @@map("pricing_promotions")
 }
 
