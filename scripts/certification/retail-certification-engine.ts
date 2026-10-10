@@ -96,7 +96,7 @@ export async function evaluateRetailCertification(): Promise<{
         id: "PROMO-TEST", tenantId: ctx.tenantId, branchId: ctx.branchId, name: "Test", type: "PERCENTAGE_DISCOUNT",
         discountValue: 10, startDate: new Date(), endDate: new Date(Date.now() + 86400000), isActive: true,
       }).discountAmount === 1000 &&
-      hasAll("apps/api/src/services/retailService.ts", "prisma.pricingPromotion.create", "sourceModule: \"RETAIL\"", "RETAIL_PROMOTION_TYPE_UNSUPPORTED") &&
+      hasAll("apps/api/src/services/retailService.ts", "tx.pricingPromotion.create", "sourceModule: \"RETAIL\"", "RETAIL_PROMOTION_TYPE_UNSUPPORTED") &&
       hasAll("apps/api/src/server.ts", "/api/v1/pricing/promotions", "DISCOUNT_MANAGE") },
     { id: 13, name: "Sales Returns & Refunds", description: "Duplicate variant lines cannot exceed sold quantity and persisted return limits are enforced.", run: () => {
       const sale: any = { saleNumber: "SALE-001", lines: [{ variantId: "v1", quantity: 2, unitPrice: 100, unitCost: 50, discountAmount: 0, taxAmount: 0, lineTotal: 200 }] };
