@@ -51,8 +51,10 @@ export async function evaluateRetailCertification(): Promise<{
     { id: 1, name: "Retail Module Architecture & Manifest", description: "Manifest exposes Retail module, checkout capability, route, and multi-branch scale.", run: () => {
       const m = engine.getModuleManifest();
       return m.moduleId === "retail_operating_system" && m.status === "ACTIVE" &&
-        m.permissions.includes("RETAIL_POS_CHECKOUT") && m.navigationRoutes.includes("/retail/pos") &&
-        m.supportedScales.includes("MULTI_BRANCH");
+        m.permissions.includes("RETAIL_POS_CHECKOUT") &&
+        m.permissions.includes("RETAIL_PROMOTION_VIEW") &&
+        m.permissions.includes("RETAIL_PROMOTION_MANAGE") &&
+        m.navigationRoutes.includes("/retail/pos") && m.supportedScales.includes("MULTI_BRANCH");
     }},
     { id: 2, name: "Product Catalog (Simple & Variant)", description: "Settings defaults satisfy the contract and catalog services expose persisted product/variant operations.", run: () =>
       RetailSettingsSchema.safeParse(defaults).success &&
@@ -97,7 +99,7 @@ export async function evaluateRetailCertification(): Promise<{
         discountValue: 10, startDate: new Date(), endDate: new Date(Date.now() + 86400000), isActive: true,
       }).discountAmount === 1000 &&
       hasAll("apps/api/src/services/retailService.ts", "tx.pricingPromotion.create", "sourceModule: \"RETAIL\"", "RETAIL_PROMOTION_TYPE_UNSUPPORTED") &&
-      hasAll("apps/api/src/server.ts", "/api/v1/pricing/promotions", "DISCOUNT_MANAGE") },
+      hasAll("apps/api/src/server.ts", "/api/v1/retail/promotions", "RETAIL_PROMOTION_VIEW", "RETAIL_PROMOTION_MANAGE", "/api/v1/pricing/promotions", "DISCOUNT_MANAGE") },
     { id: 13, name: "Sales Returns & Refunds", description: "Duplicate variant lines cannot exceed sold quantity and persisted return limits are enforced.", run: () => {
       const sale: any = { saleNumber: "SALE-001", lines: [{ variantId: "v1", quantity: 2, unitPrice: 100, unitCost: 50, discountAmount: 0, taxAmount: 0, lineTotal: 200 }] };
       const valid = engine.validateSaleReturn(sale, [{ variantId: "v1", quantityReturned: 1, refundUnitPrice: 100 }], defaults);
