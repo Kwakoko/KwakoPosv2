@@ -14,7 +14,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/App.tsx": "a67c77edd34362b241599ed2b5f28b6f55a7acd2",
   "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
   "apps/web/src/pages/VerticalCommandCenterPage.tsx": "dc932c2adf63194e6af11ed340be7ba43f9d498f",
-  "apps/web/src/pages/DashboardPage.tsx": "37cdba77322900fe5a45d4e6e7d5410e8f409d40",
+  "apps/web/src/pages/DashboardPage.tsx": "undefined",
   "apps/web/src/pages/InventoryPage.tsx": "1aada87ec4442b426973a2bba97c3d920fa86f04",
   "apps/web/src/pages/PurchasingPage.tsx": "48316f1d470fd9d3974a16b6fb05e11132e900bc",
   "apps/web/src/pages/ReportsPage.tsx": "0215ab6d294a164bc3c83b22717e73abcea27cee",
