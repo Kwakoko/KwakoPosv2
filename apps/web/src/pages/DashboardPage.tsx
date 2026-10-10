@@ -215,26 +215,26 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
   return (
     <div onClick={onClick} className={cardClass}
       style={{
-        background: 'linear-gradient(135deg, ' + accent + '12 0%, rgba(5, 18, 38, 0.96) 72%)',
-        borderColor: accent + 'cc',
-        boxShadow: 'inset 0 0 28px ' + accent + '0d, 0 0 14px ' + accent + '0a',
+        background: 'var(--surface, #1e293b)',
+        borderColor: 'var(--surface-border, #334155)',
+        boxShadow: 'var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08))',
       }}>
-      <div className={'absolute rounded-full blur-2xl opacity-20 pointer-events-none ' +
+      <div className={'absolute rounded-full blur-2xl opacity-10 pointer-events-none ' +
         (variant === 'hero' ? '-right-8 -top-10 h-32 w-32' : '-right-6 -top-8 h-24 w-24')}
         style={{ background: accent }} />
       <div className="relative z-10 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <div className={iconClass} style={{ background: accent + '22', color: accent, boxShadow: '0 0 18px ' + accent + '22' }}>
+            <div className={iconClass} style={{ background: accent + '22', color: accent }}>
               {icon}
             </div>
             <div>
-              <p className="text-[12px] font-black uppercase tracking-wide text-slate-100">{title}</p>
+              <p className="text-[12px] font-black uppercase tracking-wide" style={{ color: '#6b86ad' }}>{title}</p>
               {trend && <p className="mt-1 text-[11px] font-semibold text-emerald-400">{'↑'} {trend}</p>}
             </div>
           </div>
           <p className={valueClass}>{value}</p>
-          <p className="mt-3 max-w-[90%] text-[11px] leading-relaxed text-slate-300/90">{description}</p>
+          <p className="mt-3 max-w-[90%] text-[11px] leading-relaxed" style={{ color: '#6b86ad' }}>{description}</p>
           {action && (
             <button type="button"
               onClick={(e) => { e.stopPropagation(); action.onClick(); }}
@@ -1594,14 +1594,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         <div className="col-span-12 lg:col-span-4">
           <ReferenceKPICard title="Today's Sales"
             value={kpiCards.find((card) => card.title === 'Sales Today')?.value?.toString() || '--'}
-            icon={<Layers className="h-6 w-6" />} accent="#10f0c0" trend={stats.salesTrendPct}
+            icon={<Layers className="h-6 w-6" />} accent="#3b82f6" trend={stats.salesTrendPct}
             description="Completed sales recorded by Point of Sale" variant="hero"
             spark={[28, 34, 31, 43, 38, 50, 45, 58]} />
         </div>
         <div className="col-span-12 lg:col-span-4">
           <ReferenceKPICard title="Gross Profit (REAL)"
             value={kpiCards.find((card) => card.title === 'Gross Profit')?.value?.toString() || '--'}
-            icon={<TrendingUp className="h-6 w-6" />} accent="#2196ff"
+            icon={<TrendingUp className="h-6 w-6" />} accent="#10b981"
             trend={revenueAnalytics.profitDeltaPct !== null
               ? (Number(revenueAnalytics.profitDeltaPct) >= 0 ? '+' : '') + revenueAnalytics.profitDeltaPct + '% vs yesterday'
               : undefined}
@@ -1611,35 +1611,35 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         <div className="col-span-12 lg:col-span-4">
           <ReferenceKPICard title="Avg Order Value (AOV)"
             value={kpiCards.find((card) => card.title === 'Average Order Value')?.value?.toString() || '--'}
-            icon={<ShoppingCart className="h-6 w-6" />} accent="#c04cff" trend={stats.aovTrendPct}
+            icon={<ShoppingCart className="h-6 w-6" />} accent="#6366f1" trend={stats.aovTrendPct}
             description="Completed sales value divided by completed orders" variant="hero"
             spark={[22, 29, 28, 37, 33, 44, 39, 51]} />
         </div>
         <div className="col-span-12 sm:col-span-6 lg:col-span-3">
           <ReferenceKPICard title="Stock Alerts"
             value={kpiCards.find((card) => card.title === 'Stock Alerts')?.value?.toString() || '0'}
-            icon={<AlertTriangle className="h-5 w-5" />} accent="#ff2456"
+            icon={<AlertTriangle className="h-5 w-5" />} accent="#ef4444"
             description="Low-stock plus out-of-stock variants"
             spark={[22, 30, 25, 34, 29, 38, 33, 42]} />
         </div>
         <div className="col-span-12 sm:col-span-6 lg:col-span-3">
           <ReferenceKPICard title="Customer Debts"
             value={kpiCards.find((card) => card.title === 'Customer Debts')?.value?.toString() || 'Tsh 0'}
-            icon={<Users className="h-5 w-5" />} accent="#ffad22"
+            icon={<Users className="h-5 w-5" />} accent="#8b5cf6"
             description="Current customer receivables in the branch"
             spark={[16, 22, 19, 27, 23, 31, 27, 36]} />
         </div>
         <div className="col-span-12 sm:col-span-6 lg:col-span-3">
           <ReferenceKPICard title="Inventory Value"
             value={kpiCards.find((card) => card.title === 'Inventory Value')?.value?.toString() || 'Tsh 0'}
-            icon={<Package className="h-5 w-5" />} accent="#248bff"
+            icon={<Package className="h-5 w-5" />} accent="#ec4899"
             description="Current branch stock valuation"
             spark={[19, 26, 23, 32, 29, 39, 34, 45]} />
         </div>
         <div className="col-span-12 sm:col-span-6 lg:col-span-3">
           <ReferenceKPICard title="Device Sync"
             value={kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0'}
-            icon={<RefreshCw className="h-5 w-5" />} accent="#ff2456"
+            icon={<RefreshCw className="h-5 w-5" />} accent="#f97316"
             description={kpiCards.find((card) => card.title === 'Device Sync')?.desc || 'Device synchronization status'}
             action={kpiCards.find((card) => card.title === 'Device Sync')?.action}
             spark={[24, 35, 29, 41, 34, 45, 39, 49]} />
