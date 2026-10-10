@@ -12,6 +12,8 @@ const REQUIRED_SUBITEMS = [
 const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/InventoryPage.tsx": "1aada87ec4442b426973a2bba97c3d920fa86f04",
   "apps/web/src/services/inventoryStockService.ts": "5fadbef7dc8de26e7bc93ce95547cf7a9c8f7e3b",
+  "apps/web/src/services/inventoryReconciliationService.ts": "2515ffe79c5ed7462607029a30532686cd73c4eb",
+  "tests/unit/inventory-reconciliation-scope.test.ts": "973c36fbf2f7a5c23aea341078bd5c0c5d59b9f7",
   "packages/database/src/prismaRepositories.ts": "5d31f47aaead4b906d7e30cf275b0c3b782a048d",
   "packages/database/src/inventoryAuthority.ts": "fd3d915de4ac1851a562ee3554c5598d71529cc9",
   "packages/sync/src/worldStandardPrismaSyncEngine.ts": "0a14912d599d3e325c48759d4b25366e79f1453d",
@@ -32,6 +34,7 @@ const MARKERS: Array<[string, string, ...string[]]> = [
   ["sync-authority", "packages/sync/src/worldStandardPrismaSyncEngine.ts", "INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER", "tenantId: ctx.tenantId", "branchId: ctx.branchId"],
   ["indexeddb-ledger", "apps/web/src/indexedDb.ts", "stockLedger", "categories", "brands"],
   ["bootstrap-reconcile", "apps/web/src/clientSyncEngine.ts", "defaultBootstrapApi", "reconcileInventory", "inventory_categories_meta", "inventory_brands_meta"],
+  ["strict-local-reconciliation", "apps/web/src/services/inventoryReconciliationService.ts", "hasExactTenantBranchScope", "SYNC_CONTEXT_REQUIRED", "outOfScopeRelatedVariant"],
   ["valuation", "packages/domain/src/inventoryValuationEngine.ts", "InventoryValuationEngine", "Weighted Average Unit Cost"],
   ["clean-master-data", "apps/web/src/pages/InventoryPage.tsx", "DEFAULT_CATEGORY_RECORDS: CategoryRecord[] = []", "DEFAULT_BRAND_RECORDS: BrandRecord[] = []"],
   ["ledger-unit-tests", "tests/unit/stock-ledger-movement.test.ts", "opening stock movement", "Weighted Average Cost"],

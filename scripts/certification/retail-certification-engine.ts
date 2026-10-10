@@ -3,6 +3,7 @@ import path from "node:path";
 import { RetailSettingsSchema } from "../../packages/contracts/src/retailContracts.js";
 import { PricingTaxEngine, RetailEngine } from "@kwakopos2/domain";
 import { renderRetailDashboard } from "../../apps/web/src/retailDashboard.js";
+import { filterPosCatalogToScope, filterRecordsToTenantBranchScope } from "../../apps/web/src/services/posCatalogScope.js";
 
 type Evaluation = { pillarId: number; pillarName: string; passed: boolean; details: string };
 type Validator = { id: number; name: string; description: string; run: () => boolean };
@@ -144,9 +145,34 @@ export async function evaluateRetailCertification(): Promise<{
       return none.length === 0 && configured.length === 1 && configured[0].suggestedReorderQuantity === 15 &&
         hasAll("apps/api/src/services/retailService.ts", "getAuthoritativeRetailSignals", "soldByVariant", "stockLedger.groupBy");
     }},
-    { id: 20, name: "Retail Security & RBAC", description: "Retail actions require explicit capabilities at API boundary, with negative-path tests.", run: () =>
-      hasAll("apps/api/src/server.ts", "assertRetailCapabilityForContext", "RETAIL_AI_INSIGHTS_VIEW", "RETAIL_REPLENISHMENT_EXECUTE") &&
-      hasAll("tests/unit/retail-authorization.test.ts", "retail AI insights", "FORBIDDEN") },
+    { id: 20, name: "Retail Security & RBAC", description: "API capabilities are enforced and local POS/catalog/customer/purchasing/history reads fail closed to the exact tenant and branch.", run: () => {
+      const scoped = filterPosCatalogToScope(
+        [
+          { id: "p-active", tenantId: ctx.tenantId, branchId: ctx.branchId },
+          { id: "p-other-tenant", tenantId: "other-tenant", branchId: ctx.branchId },
+        ],
+        [
+          { id: "v-active", productId: "p-active", tenantId: ctx.tenantId, branchId: ctx.branchId },
+          { id: "v-other-tenant", productId: "p-active", tenantId: "other-tenant", branchId: ctx.branchId },
+        ],
+        ctx.tenantId,
+        ctx.branchId,
+      );
+      const customers = filterRecordsToTenantBranchScope([
+        { id: "c-active", tenantId: ctx.tenantId, branchId: ctx.branchId },
+        { id: "c-other-branch", tenantId: ctx.tenantId, branchId: "other-branch" },
+      ], ctx.tenantId, ctx.branchId);
+      return scoped.products.length === 1 && scoped.products[0].id === "p-active" &&
+        scoped.variants.length === 1 && scoped.variants[0].id === "v-active" &&
+        customers.length === 1 && customers[0].id === "c-active" &&
+        filterRecordsToTenantBranchScope([{ id: "unscoped" }], ctx.tenantId, ctx.branchId).length === 0 &&
+        hasAll("apps/api/src/server.ts", "assertRetailCapabilityForContext", "RETAIL_AI_INSIGHTS_VIEW", "RETAIL_REPLENISHMENT_EXECUTE") &&
+        hasAll("tests/unit/retail-authorization.test.ts", "retail AI insights", "FORBIDDEN") &&
+        hasAll("apps/web/src/pages/PosPage.tsx", "filterPosCatalogToScope", "filterRecordsToTenantBranchScope", "activeCartHydratedScope", "useLayoutEffect", "setCashDenominations") &&
+        hasAll("apps/web/src/components/UI/CommandPaletteModal.tsx", "filterRecordsToTenantBranchScope", "currentTenantId", "currentBranchId") &&
+        hasAll("apps/web/src/pages/PurchasingPage.tsx", "filterRecordsToTenantBranchScope") &&
+        hasAll("tests/unit/pos-catalog-scope.test.ts", "tenant and branch scope", "scopes customer and product search records");
+    }},
     { id: 21, name: "Auditability", description: "Retail audit events persist in PostgreSQL and commercial sale transactions write audit records within the authoritative transaction.", run: () =>
       hasAll("apps/api/src/services/retailService.ts", "async recordAuditEvent", "prisma.auditEvent.create", "async getAuditEvents", "metadata: { module: \"RETAIL\"") &&
       !readSource("apps/api/src/services/retailService.ts").includes("auditEventsMap") &&

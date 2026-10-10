@@ -15,7 +15,7 @@
  * Uses V2 CSS variables + semantic utility classes. Zero Tailwind / inline styles.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ShoppingCart, Search, Plus, Minus, Trash2, UserPlus, ShieldAlert,
   HelpCircle, Calculator, ArrowLeftRight, X, DollarSign, Wallet, CreditCard,
@@ -35,6 +35,7 @@ import { enqueueTraVfdOutbox, processTraVfdOutbox, getTraVfdConfig } from "../se
 import { getOrCreatePersistentDeviceId } from "../services/deviceIdentity.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
 import { normalizePaymentMethod, normalizeSalePayload } from "../services/payloadValidationService.js";
+import { filterPosCatalogToScope, filterRecordsToTenantBranchScope } from "../services/posCatalogScope.js";
 import { createDrawerOutboxItem, dispatchDrawerOutbox } from "../services/cashDrawerOutboxService.js";
 import type { CustomerDisplayPayload } from "./CustomerDisplayPage.js";
 
@@ -82,6 +83,9 @@ export interface HeldCartRecord {
 export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const { currentTenantId, currentTenantName } = useTenant();
   const { currentBranchId, currentBranchName } = useBranch();
+  const activeContextKey = currentTenantId && currentBranchId
+    ? `${currentTenantId}:${currentBranchId}`
+    : null;
   const { user } = useAuth();
   const { hasPermission } = useRbac();
   const { isOnline, syncOutbox, db } = useSync();
@@ -100,16 +104,32 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
 
-  // Authoritative local catalog projection. Production POS must never invent demo products.
-  const [products, setProducts] = useState<PosProduct[]>([]);
+  // The local database is shared across sign-in contexts. Never render a catalog
+  // unless its exact tenant/branch scope matches the active context.
+  const [catalogState, setCatalogState] = useState<{ scopeKey: string | null; products: PosProduct[] }>({
+    scopeKey: null,
+    products: [],
+  });
+  const products = catalogState.scopeKey === activeContextKey ? catalogState.products : [];
 
   useEffect(() => {
     let active = true;
     const hydrateCatalog = async () => {
       try {
         await db.ready;
+        if (!currentTenantId || !currentBranchId || !activeContextKey) {
+          if (active) setCatalogState({ scopeKey: null, products: [] });
+          return;
+        }
+
+        const scopedCatalog = filterPosCatalogToScope(
+          Array.from(db.products.values()),
+          Array.from(db.productVariants.values()),
+          currentTenantId,
+          currentBranchId,
+        );
         const variantsByProduct = new Map<string, PosProduct["variants"]>();
-        for (const variant of db.productVariants.values()) {
+        for (const variant of scopedCatalog.variants) {
           const list = variantsByProduct.get(variant.productId) || [];
           list.push({
             id: variant.id,
@@ -121,7 +141,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
           });
           variantsByProduct.set(variant.productId, list);
         }
-        const mapped = Array.from(db.products.values())
+        const mapped = scopedCatalog.products
           .filter((p: any) => !p.deletedAt && !p.deleted_at && p.status !== "Inactive")
           .map((product: any) => {
             const vars = variantsByProduct.get(product.id);
@@ -139,10 +159,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               variants: vars,
             };
           });
-        if (active) setProducts(mapped);
+        if (active) setCatalogState({ scopeKey: activeContextKey, products: mapped });
       } catch (error) {
         console.error("[POS] Failed to hydrate authoritative catalog", error);
-        if (active) setProducts([]);
+        if (active) setCatalogState({ scopeKey: activeContextKey, products: [] });
       }
     };
     void hydrateCatalog();
@@ -153,12 +173,25 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       window.removeEventListener(DATA_CHANGED_EVENT, hydrateCatalog);
       window.removeEventListener(STOCK_CHANGED_EVENT, hydrateCatalog);
     };
-  }, [db]);
+  }, [db, currentTenantId, currentBranchId, activeContextKey]);
 
-  // Cart State with IndexedDB-only session persistence.
-  // IndexedDB is the sole durable local authority; hydration completes before persistence is enabled.
-  const [cart, setCart] = useState<PosCartItem[]>([]);
-  const [activeCartHydrated, setActiveCartHydrated] = useState(false);
+  // Active and held carts are keyed by the exact authenticated context. The derived
+  // values hide the previous scope immediately while the next scope is hydrating.
+  const [cartState, setCartState] = useState<{ scopeKey: string | null; items: PosCartItem[] }>({
+    scopeKey: null,
+    items: [],
+  });
+  const cart = cartState.scopeKey === activeContextKey ? cartState.items : [];
+  const setCart = useCallback<React.Dispatch<React.SetStateAction<PosCartItem[]>>>((update) => {
+    setCartState((previous) => {
+      const previousItems = previous.scopeKey === activeContextKey ? previous.items : [];
+      const items = typeof update === "function"
+        ? (update as (prior: PosCartItem[]) => PosCartItem[])(previousItems)
+        : update;
+      return { scopeKey: activeContextKey, items };
+    });
+  }, [activeContextKey]);
+  const [activeCartHydratedScope, setActiveCartHydratedScope] = useState<string | null>(null);
 
   // Barcode Label Generator Modal State
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
@@ -175,39 +208,43 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [lineNoteInput, setLineNoteInput] = useState("");
 
   useEffect(() => {
-    if (!activeCartHydrated) return;
+    if (!activeContextKey || activeCartHydratedScope !== activeContextKey) return;
     try {
-      db.saveConfigurationLocal(
-        "pos_active_cart",
-        cart,
-        currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
-      );
+      db.saveConfigurationLocal("pos_active_cart", cart, {
+        tenantId: currentTenantId!,
+        branchId: currentBranchId!,
+      });
     } catch (error) {
       console.warn("[POS] Failed to persist active cart to IndexedDB", error);
     }
-  }, [cart, activeCartHydrated, db, currentTenantId, currentBranchId]);
+  }, [cart, activeContextKey, activeCartHydratedScope, db, currentTenantId, currentBranchId]);
 
   useEffect(() => {
     let active = true;
+    const scopeAtStart = activeContextKey;
+    setActiveCartHydratedScope(null);
+    setCart([]);
     const hydrateActiveCart = async () => {
       try {
         await db.ready;
-        const persisted = db.getConfigurationLocal(
-          "pos_active_cart",
-          currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
-        );
+        const persisted = scopeAtStart && currentTenantId && currentBranchId
+          ? db.getConfigurationLocal("pos_active_cart", {
+              tenantId: currentTenantId,
+              branchId: currentBranchId,
+            })
+          : undefined;
         if (active) {
-          if (Array.isArray(persisted)) setCart(persisted);
-          setActiveCartHydrated(true);
+          setCart(Array.isArray(persisted) ? persisted : []);
+          if (scopeAtStart) setActiveCartHydratedScope(scopeAtStart);
         }
       } catch (error) {
         console.warn("[POS] Failed to hydrate active cart from IndexedDB", error);
-        if (active) setActiveCartHydrated(true);
+        if (active) setCart([]);
       }
     };
     void hydrateActiveCart();
     return () => { active = false; };
-  }, [db, currentTenantId, currentBranchId]);
+  }, [db, currentTenantId, currentBranchId, activeContextKey]);
 
   const [discountPercent, setDiscountPercent] = useState(0);
 
@@ -219,7 +256,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       }
     } catch {}
     return 0; // Default VAT = 0%
-  }, [db]);
+  }, [db, currentTenantId, currentBranchId]);
 
   const [taxInclusivePricing, setTaxInclusivePricing] = useState<boolean>(() => {
     try {
@@ -257,28 +294,49 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     };
     void hydrateTaxRate();
     return () => { active = false; };
-  }, [db]);
+  }, [db, currentTenantId, currentBranchId]);
 
   const [selectedCustomer, setSelectedCustomer] = useState("Walk-In Customer");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [showQuickKeys, setShowQuickKeys] = useState(true);
   const [lineDiscountModal, setLineDiscountModal] = useState<{ index: number; itemName: string; currentPercent: number } | null>(null);
   const [customLineDiscountInput, setCustomLineDiscountInput] = useState("");
-  const [customerOptions, setCustomerOptions] = useState<Array<{ id: string; name: string; phone?: string }>>([]);
+  const [customerOptionsState, setCustomerOptionsState] = useState<{
+    scopeKey: string | null;
+    items: Array<{ id: string; name: string; phone?: string }>;
+  }>({ scopeKey: null, items: [] });
+  const customerOptions = customerOptionsState.scopeKey === activeContextKey ? customerOptionsState.items : [];
+  const setCustomerOptions = useCallback<React.Dispatch<React.SetStateAction<Array<{ id: string; name: string; phone?: string }>>>>((update) => {
+    setCustomerOptionsState((previous) => {
+      const priorItems = previous.scopeKey === activeContextKey ? previous.items : [];
+      const items = typeof update === "function"
+        ? (update as (prior: Array<{ id: string; name: string; phone?: string }>) => Array<{ id: string; name: string; phone?: string }>)(priorItems)
+        : update;
+      return { scopeKey: activeContextKey, items };
+    });
+  }, [activeContextKey]);
 
   useEffect(() => {
     let active = true;
     const hydrateCustomers = async () => {
       try {
         await db.ready;
-        const custs = Array.from(db.customers.values());
-        if (active && custs.length > 0) {
-          const records = custs
-            .filter((c: any) => c.id && c.name)
-            .map((c: any) => ({ id: String(c.id), name: String(c.name), phone: c.phone ? String(c.phone) : undefined }));
-          setCustomerOptions(records);
+        if (!currentTenantId || !currentBranchId || !activeContextKey) {
+          if (active) setCustomerOptions([]);
+          return;
         }
-      } catch {}
+        const custs = filterRecordsToTenantBranchScope(
+          Array.from(db.customers.values()),
+          currentTenantId,
+          currentBranchId,
+        );
+        const records = custs
+          .filter((c: any) => c.id && c.name)
+          .map((c: any) => ({ id: String(c.id), name: String(c.name), phone: c.phone ? String(c.phone) : undefined }));
+        if (active) setCustomerOptions(records);
+      } catch {
+        if (active) setCustomerOptions([]);
+      }
     };
     void hydrateCustomers();
     window.addEventListener(DATA_CHANGED_EVENT, hydrateCustomers);
@@ -286,7 +344,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       active = false;
       window.removeEventListener(DATA_CHANGED_EVENT, hydrateCustomers);
     };
-  }, [db]);
+  }, [db, currentTenantId, currentBranchId, activeContextKey, setCustomerOptions]);
 
   const handleQuickAddCustomer = async () => {
     const trimmed = newCustomerName.trim();
@@ -323,53 +381,72 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     publishDataChanged({ action: "CUSTOMER_CREATED", customer: newCust });
   };
 
-  // Held carts are session-local durable state stored only in tenant/branch-scoped IndexedDB.
-  const [heldCarts, setHeldCarts] = useState<HeldCartRecord[]>([]);
-  const [heldCartsHydrated, setHeldCartsHydrated] = useState(false);
+  // Held carts are also scope-keyed so switching branches/tenants cannot briefly
+  // expose or persist the preceding context's suspended sale.
+  const [heldCartsState, setHeldCartsState] = useState<{ scopeKey: string | null; items: HeldCartRecord[] }>({
+    scopeKey: null,
+    items: [],
+  });
+  const heldCarts = heldCartsState.scopeKey === activeContextKey ? heldCartsState.items : [];
+  const setHeldCarts = useCallback<React.Dispatch<React.SetStateAction<HeldCartRecord[]>>>((update) => {
+    setHeldCartsState((previous) => {
+      const previousItems = previous.scopeKey === activeContextKey ? previous.items : [];
+      const items = typeof update === "function"
+        ? (update as (prior: HeldCartRecord[]) => HeldCartRecord[])(previousItems)
+        : update;
+      return { scopeKey: activeContextKey, items };
+    });
+  }, [activeContextKey]);
+  const [heldCartsHydratedScope, setHeldCartsHydratedScope] = useState<string | null>(null);
 
   const persistHeldCarts = useCallback(
     (records: HeldCartRecord[]) => {
+      if (!activeContextKey || heldCartsHydratedScope !== activeContextKey) return;
       try {
-        db.saveConfigurationLocal(
-          "pos_held_carts",
-          records,
-          currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
-        );
+        db.saveConfigurationLocal("pos_held_carts", records, {
+          tenantId: currentTenantId!,
+          branchId: currentBranchId!,
+        });
       } catch (e) {
         console.warn("[POS] Failed to save held carts to IndexedDB:", e);
       }
     },
-    [db, currentTenantId, currentBranchId]
+    [db, currentTenantId, currentBranchId, activeContextKey, heldCartsHydratedScope]
   );
 
   useEffect(() => {
     let isMounted = true;
+    const scopeAtStart = activeContextKey;
+    setHeldCartsHydratedScope(null);
+    setHeldCarts([]);
     const loadHeldCarts = async () => {
       try {
         await db.ready;
-        const fromDb = db.getConfigurationLocal(
-          "pos_held_carts",
-          currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
-        );
+        const fromDb = scopeAtStart && currentTenantId && currentBranchId
+          ? db.getConfigurationLocal("pos_held_carts", {
+              tenantId: currentTenantId,
+              branchId: currentBranchId,
+            })
+          : undefined;
         if (isMounted) {
           setHeldCarts(Array.isArray(fromDb) ? fromDb : []);
-          setHeldCartsHydrated(true);
+          if (scopeAtStart) setHeldCartsHydratedScope(scopeAtStart);
         }
       } catch (e) {
         console.warn("[POS] Failed to hydrate held carts from IndexedDB:", e);
-        if (isMounted) setHeldCartsHydrated(true);
+        if (isMounted) setHeldCarts([]);
       }
     };
     void loadHeldCarts();
     return () => {
       isMounted = false;
     };
-  }, [db, currentTenantId, currentBranchId]);
+  }, [db, currentTenantId, currentBranchId, activeContextKey]);
 
   useEffect(() => {
-    if (!heldCartsHydrated) return;
+    if (!activeContextKey || heldCartsHydratedScope !== activeContextKey) return;
     persistHeldCarts(heldCarts);
-  }, [heldCarts, heldCartsHydrated, persistHeldCarts]);
+  }, [heldCarts, heldCartsHydratedScope, activeContextKey, persistHeldCarts]);
 
   const [holdCartModal, setHoldCartModal] = useState(false);
   const [resumeCartModal, setResumeCartModal] = useState(false);
@@ -419,34 +496,102 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [voidReason, setVoidReason] = useState("");
   const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
 
+  useLayoutEffect(() => {
+    // Run before paint so a tenant/branch switch cannot flash the previous
+    // context's customer, receipt, sales history, cash shift or payment details.
+    setSelectedCustomer("Walk-In Customer");
+    setSelectedCustomerId(null);
+    setCustomerOptions([]);
+    setPastOrders([]);
+    setDiscountPercent(0);
+    setSelectedTaxRate(getBaseTaxRate());
+    try {
+      const cfg = activeContextKey
+        ? db.getConfigurationLocal("tax.config", {
+            tenantId: currentTenantId!,
+            branchId: currentBranchId!,
+          }) as any
+        : undefined;
+      setTaxInclusivePricing(cfg?.taxInclusivePricing !== false);
+    } catch {
+      setTaxInclusivePricing(true);
+    }
+    setSearchQuery("");
+    setSelectedCategory("All");
+    setCheckoutModal(false);
+    setReceiptModal(false);
+    setLastSale(null);
+    setVariantModalProduct(null);
+    setIsHistoryModalOpen(false);
+    setHistorySearch("");
+    setHistoryDateFilter("ALL");
+    setCollapsedDays({});
+    setIsReturnsModalOpen(false);
+    setReturnOrderId("");
+    setSelectedOrderToReturn(null);
+    setSelectedOrderToVoid(null);
+    setReturnItems({});
+    setVoidReason("");
+    setIsVoidModalOpen(false);
+    setBackdatedSaleAt("");
+    setMpesaRef("");
+    setCardAuthRef("");
+    setBankRef("");
+    setSplitAmounts({ Cash: 0, MPesa: 0, Card: 0, Bank: 0 });
+    setSupervisorModal(false);
+    setSupervisorReason("");
+    setPendingCallback(null);
+    setShiftOpen(false);
+    setShiftModal(false);
+    setOpeningFloat(0);
+    setDeclaredCash(0);
+    setCashDenominations({ 10000: 0, 5000: 0, 2000: 0, 1000: 0, 500: 0 });
+  }, [activeContextKey, currentTenantId, currentBranchId, db, getBaseTaxRate]);
+
   const toggleDayCollapse = (dateKey: string) => {
     setCollapsedDays((prev) => ({ ...prev, [dateKey]: !prev[dateKey] }));
   };
 
-  // Hydrate past orders from LocalIndexedDbStore
+  // Sales history is also backed by the shared local replica; scope both offline
+  // records and the displayed result to the active tenant/branch context.
   useEffect(() => {
     let active = true;
     const loadOrders = async () => {
       try {
         await db.ready;
+        if (!currentTenantId || !currentBranchId || !activeContextKey) {
+          if (active) setPastOrders([]);
+          return;
+        }
         if (isOnline) {
           const response = await apiFetch<{ success: boolean; data?: any[] }>("/api/v1/pos/sales", { method: "GET" });
           const remote = Array.isArray(response?.data) ? response.data : [];
+          const scopedRemote = filterRecordsToTenantBranchScope(remote, currentTenantId, currentBranchId);
           if (active) {
-            setPastOrders(remote.map((sale: any) => ({
+            setPastOrders(scopedRemote.map((sale: any) => ({
               ...sale,
               customer: sale.customer?.name || sale.customerName || "Walk-In Customer",
               items: sale.lines || sale.items || [],
             })).sort((a: any, b: any) => new Date(b.soldAt || 0).getTime() - new Date(a.soldAt || 0).getTime()));
           }
         } else {
-          const salesArr = Array.from(db.sales.values());
+          const salesArr = filterRecordsToTenantBranchScope(
+            Array.from(db.sales.values()),
+            currentTenantId,
+            currentBranchId,
+          );
           if (active) setPastOrders(
             salesArr.sort((a: any, b: any) => new Date(b.soldAt || 0).getTime() - new Date(a.soldAt || 0).getTime())
           );
         }
       } catch {
-        if (active && !isOnline) setPastOrders(Array.from(db.sales.values()));
+        if (active && !isOnline && currentTenantId && currentBranchId) {
+          setPastOrders(filterRecordsToTenantBranchScope(
+            Array.from(db.sales.values()),
+            currentTenantId,
+            currentBranchId,
+          ));
+        } else if (active) setPastOrders([]);
       }
     };
     void loadOrders();
@@ -455,7 +600,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       active = false;
       window.removeEventListener(DATA_CHANGED_EVENT, loadOrders);
     };
-  }, [db, isOnline]);
+  }, [db, isOnline, currentTenantId, currentBranchId, activeContextKey]);
 
   // Sidebar Sub-item listener (New Sale, Sales History, Returns)
   useEffect(() => {
@@ -1350,12 +1495,18 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       const productId = String(info.product?.id || "");
       if (productId) stockSoldByProduct.set(productId, (stockSoldByProduct.get(productId) || 0) + Number(info.qty || 0));
     }
-    setProducts((prev) =>
-      prev.map((p) => {
-        const totalSold = stockSoldByProduct.get(p.id) || 0;
-        return totalSold > 0 ? { ...p, stock: Math.max(0, p.stock - totalSold) } : p;
-      })
-    );
+    setCatalogState((previous) => {
+      if (previous.scopeKey !== activeContextKey) return previous;
+      return {
+        ...previous,
+        products: previous.products.map((product) => {
+          const totalSold = stockSoldByProduct.get(product.id) || 0;
+          return totalSold > 0
+            ? { ...product, stock: Math.max(0, product.stock - totalSold) }
+            : product;
+        }),
+      };
+    });
 
     // Customer credit projection was committed atomically with the sale above.
 

@@ -6,32 +6,43 @@ import {
   normalizeStockAdjustmentPayload,
 } from "./payloadValidationService.js";
 
+function hasExactTenantBranchScope(record: any, tenantId: string, branchId: string): boolean {
+  return (record?.tenantId ?? record?.tenant_id) === tenantId &&
+    (record?.branchId ?? record?.branch_id) === branchId;
+}
+
 export async function reconcileLocalInventoryToOutbox(
   db: LocalIndexedDbStore,
   tenantId?: string,
   branchId?: string,
 ): Promise<number> {
   if (!db || !db.products) return 0;
+  if (!tenantId?.trim() || !branchId?.trim()) {
+    throw new Error("SYNC_CONTEXT_REQUIRED: tenantId and branchId are required for local inventory reconciliation");
+  }
   let reconciled = 0;
-  const tenant = tenantId || "tenant-default";
-  const branch = branchId || "branch-default";
+  const tenant = tenantId.trim();
+  const branch = branchId.trim();
   const trackedProductIds = new Set<string>();
   const syncOutboxMap = (db as any).syncOutbox as Map<string, any> | undefined;
   if (syncOutboxMap) for (const item of syncOutboxMap.values()) if (item.tenantId === tenant && item.branchId === branch && item.entityType === "Product" && item.entityId) trackedProductIds.add(item.entityId);
 
   for (const [prodId, prod] of db.products.entries()) {
     const pAny = prod as any;
-    if (pAny.tenantId && pAny.tenantId !== tenant) continue;
-    if (pAny.branchId && pAny.branchId !== branch) continue;
+    if (!hasExactTenantBranchScope(pAny, tenant, branch)) continue;
     if (pAny.deletedAt || pAny.deleted_at || pAny.status === "Inactive" || pAny.synced || pAny.reconciledToOutbox) continue;
     if (trackedProductIds.has(prodId)) continue;
-    const variants: any[] = [];
-    for (const v of db.productVariants.values()) {
-      const va = v as any;
-      if (va.productId === prodId && (!va.tenantId || va.tenantId === tenant) && (!va.branchId || va.branchId === branch)) {
-        variants.push(va);
-      }
-    }
+
+    // If any cached child variant lacks the exact same scope, do not turn an
+    // ambiguous parent/child graph into tenant-owned outbox mutations.
+    const relatedVariants = Array.from(db.productVariants.values()).filter(
+      (variant: any) => variant.productId === prodId,
+    ) as any[];
+    const outOfScopeRelatedVariant = relatedVariants.some(
+      (variant) => !hasExactTenantBranchScope(variant, tenant, branch),
+    );
+    if (outOfScopeRelatedVariant) continue;
+    const variants = relatedVariants;
     const defaultVarId = variants.length > 0 ? variants[0].id : `${prodId}-default`;
     const effectiveVariants = variants.length > 0 ? variants.map((v) => ({
       id: String(v.id || defaultVarId),

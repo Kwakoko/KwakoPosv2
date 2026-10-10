@@ -17,6 +17,8 @@ describe("Inventory Production Lock v1 contract", () => {
     for (const file of [
       "apps/web/src/pages/InventoryPage.tsx",
       "apps/web/src/services/inventoryStockService.ts",
+      "apps/web/src/services/inventoryReconciliationService.ts",
+      "tests/unit/inventory-reconciliation-scope.test.ts",
       "packages/database/src/prismaRepositories.ts",
       "packages/database/src/inventoryAuthority.ts",
       "packages/sync/src/worldStandardPrismaSyncEngine.ts",
