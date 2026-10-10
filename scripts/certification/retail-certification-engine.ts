@@ -149,13 +149,18 @@ export async function evaluateRetailCertification(): Promise<{
       hasAll("apps/api/src/services/retailService.ts", "async recordAuditEvent", "prisma.auditEvent.create", "async getAuditEvents", "metadata: { module: \"RETAIL\"") &&
       !readSource("apps/api/src/services/retailService.ts").includes("auditEventsMap") &&
       hasAll("packages/database/src/atomicCommercialFinance.ts", "tx.auditEvent.create", "SALE_CREATED") },
-    { id: 22, name: "Data Integrity & Hard Invariants", description: "Orphan variants and duplicate SKUs are rejected by executable invariant checks.", run: () => {
-      let orphan = false, duplicate = false;
+    { id: 22, name: "Data Integrity & Hard Invariants", description: "Orphan variants, duplicate SKUs, and duplicate branch-scoped barcodes are rejected by executable invariant checks and the database uniqueness migration.", run: () => {
+      let orphan = false, duplicate = false, duplicateBarcode = false;
       try { engine.assertRetailInvariants([], [{ id: "v1", productId: "missing", sku: "S1" }] as any, [], []); } catch { orphan = true; }
       try { engine.assertRetailInvariants([{ id: "p1" }] as any, [
         { id: "v1", productId: "p1", sku: "DUP" }, { id: "v2", productId: "p1", sku: "DUP" },
       ] as any, [], []); } catch { duplicate = true; }
-      return orphan && duplicate;
+      try { engine.assertRetailInvariants([{ id: "p1" }] as any, [
+        { id: "v1", tenantId: ctx.tenantId, branchId: ctx.branchId, productId: "p1", sku: "S1", barcode: "ABC" },
+        { id: "v2", tenantId: ctx.tenantId, branchId: ctx.branchId, productId: "p1", sku: "S2", barcode: "abc" },
+      ] as any, [], []); } catch { duplicateBarcode = true; }
+      return orphan && duplicate && duplicateBarcode &&
+        hasAll("packages/database/prisma/migrations/202610100002_variant_barcode_uniqueness/migration.sql", "CREATE UNIQUE INDEX", "RETAIL_BARCODE_DUPLICATES_BLOCK_MIGRATION");
     }},
     { id: 23, name: "Retail Notifications", description: "Notification dispatch and health contracts exist.", run: () =>
       hasAll("apps/api/src/services/notificationService.ts", "NotificationService", "NotificationCategory", "tenantId") &&
