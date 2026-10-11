@@ -177,7 +177,7 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, tre
 
 // ─── Data Models ─────────────────────────────────────────────────────────────
 
-// KPI cards use the pre-reference dashboard card component above.
+// KPI cards use the original dashboard card component.
 
 interface LocalProduct {
   id: string;
@@ -1518,6 +1518,147 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         {kpiCards.map((card, i) => (
           <KPICard key={i} {...card} />
         ))}
+      </div>
+
+      {/* ── GAAP Net Turnover Ledger Strip (Gross Sales - Discounts - Refunds = Net Sales) ── */}
+      <div
+        style={{
+          background: "var(--surface-2)",
+          border: "1px solid var(--surface-border)",
+          borderRadius: "var(--radius-md)",
+          padding: "0.85rem 1.25rem",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "1rem",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: "220px" }}>
+          <div
+            style={{
+              width: "36px",
+              height: "36px",
+              borderRadius: "10px",
+              background: "rgba(59, 130, 246, 0.12)",
+              color: "#3b82f6",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Layers size={18} />
+          </div>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ fontWeight: 800, fontSize: "13px", color: "var(--text)" }}>
+                GAAP Turnover Ledger
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "3.5px",
+                  padding: "1px 6px",
+                  borderRadius: "10px",
+                  background: "rgba(59, 130, 246, 0.12)",
+                  color: "#3b82f6",
+                  fontSize: "9.5px",
+                  fontWeight: 700,
+                  border: "1px solid rgba(59, 130, 246, 0.25)",
+                }}
+              >
+                Today's Accrual
+              </span>
+            </div>
+            <div style={{ fontSize: "10.5px", color: "var(--muted)", marginTop: "1px" }}>
+              Gross receipts reconciled after discounts, returns & refunds
+            </div>
+          </div>
+        </div>
+
+        {/* Ledger Equation: Gross - Discounts - Refunds = Net Sales */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "0.75rem",
+            fontSize: "11px",
+          }}
+        >
+          {/* Gross Sales */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span style={{ color: "var(--muted)", fontSize: "10px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Gross Sales
+            </span>
+            <span className="v2-mono" style={{ fontWeight: 800, fontSize: "13px", color: "var(--text)" }}>
+              {fmtCcy(stats.grossSales)}
+            </span>
+          </div>
+
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>−</span>
+
+          {/* Discounts */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span style={{ color: "var(--muted)", fontSize: "10px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Discounts
+            </span>
+            <span className="v2-mono" style={{ fontWeight: 800, fontSize: "13px", color: stats.todayDiscounts > 0 ? "var(--warning)" : "var(--muted)" }}>
+              {fmtCcy(stats.todayDiscounts)}
+            </span>
+          </div>
+
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>−</span>
+
+          {/* Refunds & Returns */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <span style={{ color: "var(--muted)", fontSize: "10px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                Refunds / Returns
+              </span>
+              {stats.todayRefundCount > 0 && (
+                <span
+                  style={{
+                    padding: "0 4px",
+                    borderRadius: "4px",
+                    background: "rgba(239, 68, 68, 0.15)",
+                    color: "var(--danger)",
+                    fontSize: "9px",
+                    fontWeight: 800,
+                  }}
+                >
+                  {stats.todayRefundCount}
+                </span>
+              )}
+            </div>
+            <span className="v2-mono" style={{ fontWeight: 800, fontSize: "13px", color: stats.todayRefunds > 0 ? "var(--danger)" : "var(--muted)" }}>
+              {fmtCcy(stats.todayRefunds)}
+            </span>
+          </div>
+
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>=</span>
+
+          {/* Net Sales */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              padding: "4px 10px",
+              borderRadius: "8px",
+              background: "rgba(16, 185, 129, 0.12)",
+              border: "1px solid rgba(16, 185, 129, 0.25)",
+            }}
+          >
+            <span style={{ color: "#10b981", fontSize: "10px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Net Sales
+            </span>
+            <span className="v2-mono" style={{ fontWeight: 900, fontSize: "14px", color: "#10b981" }}>
+              {fmtCcy(stats.netSales)}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* ── Register Till & Cash In Drawer Reconciliation Strip ─────────── */}
